@@ -1,0 +1,4 @@
+{
+  "valor_alerta": 2000.0,
+  "dias_vencimento_alerta": 5
+}
