@@ -547,7 +547,7 @@ else:
         plot_trend_chart(df_filtered)
 
         st.subheader("🍕 Distribuição de Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto')
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
 
         st.subheader("👥 Comparativo entre Perfis")
         plot_profile_comparison(df_filtered)
