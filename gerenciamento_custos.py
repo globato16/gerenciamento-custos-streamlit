@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 import uuid
+import json
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal, ROUND_DOWN
@@ -10,6 +12,7 @@ from decimal import Decimal, ROUND_DOWN
 # Nome do arquivo para persistência dos dados
 DATA_FILE = "dados_custos.csv"
 CARDS_FILE = "cartoes.csv"  # armazena cartões: Nome,Bandeira,Dono,DiaFechamento
+GOALS_FILE = "metas.json"   # armazena metas por perfil
 
 # --- Funções de Gerenciamento de Categorias ---
 CATEGORIES_ENTRADA_FILE = "categorias_entrada.txt"
@@ -64,6 +67,24 @@ def load_cards():
 
 def save_cards(df_cards):
     df_cards.to_csv(CARDS_FILE, index=False)
+
+# --- Gerenciamento de metas (arquivo metas.json) ---
+def load_goals():
+    try:
+        with open(GOALS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        st.warning(f"Não foi possível carregar metas: {e}")
+        return {}
+
+def save_goals(goals):
+    try:
+        with open(GOALS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(goals, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.warning(f"Não foi possível salvar metas: {e}")
 
 # --- Função auxiliar: dividir valor em parcelas com centavos distribuídos ---
 def split_amount_into_installments(total_value, n_installments):
@@ -239,8 +260,6 @@ if not st.session_state['logged_in']:
                 st.error("Usuário ou senha incorretos.")
 else:
     # --- Funções de Gráficos ---
-    import plotly.graph_objects as go
-
     def plot_trend_chart(df, title="Tendência de Gastos e Entradas"):
         if df.empty:
             st.info("Sem dados para exibir o gráfico de tendência.")
@@ -272,6 +291,54 @@ else:
         fig = px.bar(grouped, x='Pessoa', y='Valor', color='Tipo', barmode='group', title="Comparativo de Entradas e Gastos por Perfil")
         fig.update_layout(template="plotly_white", yaxis_title="Valor (R$)")
         st.plotly_chart(fig, use_container_width=True)
+
+    # Novas funções de plot para metas
+    def plot_spending_vs_goal(resumo_df, meta_gasto, profile):
+        """
+        resumo_df: DataFrame com índice 'Ano-Mês' e colunas 'Entrada' e 'Gasto' (já calculado)
+        meta_gasto: float ou None
+        """
+        if resumo_df.empty:
+            st.info("Sem dados para exibir comparação com meta.")
+            return
+        dfp = resumo_df.reset_index().copy()
+        dfp = dfp.sort_values('Ano-Mês')
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=dfp.get('Gasto', 0), mode='lines+markers', name='Gasto', line=dict(color='crimson')))
+        if meta_gasto is not None:
+            fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=[meta_gasto]*len(dfp), mode='lines', name='Meta Gasto', line=dict(color='black', dash='dash')))
+        fig.update_layout(title=f"Gastos x Meta - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # resumo textual
+        if meta_gasto is not None:
+            dfp['Excedeu'] = dfp['Gasto'] > meta_gasto
+            excedeu_count = dfp['Excedeu'].sum()
+            st.write(f"{excedeu_count} mês(es) superaram a meta de gasto.")
+
+    def plot_sobra_vs_goal(resumo_df, meta_sobra_percent, profile):
+        """
+        mostra a sobra (Entrada - Gasto) e a meta de sobra (meta_percent% da Entrada) por mês.
+        """
+        if resumo_df.empty:
+            st.info("Sem dados para exibir comparação de sobra com meta.")
+            return
+        dfp = resumo_df.reset_index().copy()
+        dfp = dfp.sort_values('Ano-Mês')
+        dfp['Sobra'] = dfp.get('Entrada', 0) - dfp.get('Gasto', 0)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=dfp['Sobra'], mode='lines+markers', name='Sobra (Entrada - Gasto)', line=dict(color='green')))
+        if meta_sobra_percent is not None:
+            dfp['MetaSobra'] = dfp.get('Entrada', 0) * (meta_sobra_percent / 100.0)
+            fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=dfp['MetaSobra'], mode='lines', name=f'Meta Sobra ({meta_sobra_percent}%)', line=dict(color='black', dash='dash')))
+        fig.update_layout(title=f"Sobra x Meta de Sobra - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # resumo textual
+        if meta_sobra_percent is not None:
+            dfp['AtingiuSobra'] = dfp['Sobra'] >= dfp['MetaSobra']
+            atingiu_count = dfp['AtingiuSobra'].sum()
+            st.write(f"{atingiu_count} mês(es) atingiram a meta de sobra ({meta_sobra_percent}%).")
 
     # --- Interface Principal ---
     def main():
@@ -385,6 +452,12 @@ else:
 
         df_profile = load_data(profile)
 
+        # carregar metas para este perfil
+        goals = load_goals()
+        profile_goals = goals.get(profile, {})
+        meta_gasto_default = profile_goals.get('meta_gasto', None)
+        meta_sobra_percent_default = profile_goals.get('meta_sobra_percent', None)
+
         st.sidebar.header(f"Adicionar Transação ({profile})")
         tipo = st.sidebar.selectbox("Tipo", ["Entrada", "Gasto"], key=f"tipo_select_{profile}")
 
@@ -425,6 +498,24 @@ else:
                                                  pago_com_cartao, cartao, num_parcelas, parcela_atual, gerar_parcelas)
                     st.success("Transação adicionada com sucesso!")
                     st.rerun()
+
+        # --- Metas (form separado) ---
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Metas (mensal)")
+
+        with st.sidebar.form(f"metas_form_{profile}"):
+            meta_gasto = st.number_input("Meta de Gastos mensal (R$)", min_value=0.0, step=10.0, value=float(meta_gasto_default) if meta_gasto_default not in (None, pd.NA) else 0.0)
+            meta_sobra_percent = st.number_input("Meta de sobra (% da entrada)", min_value=0.0, max_value=100.0, step=1.0, value=float(meta_sobra_percent_default) if meta_sobra_percent_default not in (None, pd.NA) else 0.0)
+            save_meta = st.form_submit_button("Salvar Metas")
+            if save_meta:
+                goals = load_goals()
+                goals[profile] = {
+                    'meta_gasto': float(meta_gasto),
+                    'meta_sobra_percent': float(meta_sobra_percent)
+                }
+                save_goals(goals)
+                st.success("Metas salvas.")
+                st.rerun()
 
         if df_profile.empty:
             st.info("Nenhuma transação neste perfil.")
@@ -469,13 +560,35 @@ else:
         st.subheader("🍕 Gastos por Categoria")
         plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
 
+        # --- Resumo mensal para metas e gráficos de comparação ---
         df_filtered_local = df_filtered.copy()
         df_filtered_local['Ano-Mês'] = pd.to_datetime(df_filtered_local['Data']).dt.to_period('M').astype(str)
+
         resumo = df_filtered_local.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
-        resumo['Saldo'] = resumo.get('Entrada', 0) - resumo.get('Gasto', 0)
+        # garantir colunas Entrada/Gasto existam
+        if 'Entrada' not in resumo.columns:
+            resumo['Entrada'] = 0.0
+        if 'Gasto' not in resumo.columns:
+            resumo['Gasto'] = 0.0
+        resumo['Saldo'] = resumo['Entrada'] - resumo['Gasto']
 
         st.subheader("📊 Resumo Mensal")
         st.dataframe(resumo)
+
+        # carregar metas atuais (após possível edição)
+        goals = load_goals()
+        profile_goals = goals.get(profile, {})
+        meta_gasto_val = profile_goals.get('meta_gasto', None)
+        meta_sobra_percent_val = profile_goals.get('meta_sobra_percent', None)
+
+        # mostrar metas atuais
+        with st.expander("Metas atuais"):
+            st.write(f"Meta de Gastos mensal: R$ {meta_gasto_val if meta_gasto_val not in (None, pd.NA) else 'Não definida'}")
+            st.write(f"Meta de sobra: {meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else 'Não definida'} % da entrada")
+
+        # gráficos de comparação com metas
+        plot_spending_vs_goal(resumo, meta_gasto_val if meta_gasto_val not in (None, pd.NA) else None, profile)
+        plot_sobra_vs_goal(resumo, meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else None, profile)
 
     # --- Aba de Perfis ---
     def manage_profiles_tab():
