@@ -1,0 +1,9 @@
+Combustível
+Água
+Luz
+Gás
+Condomínio
+Lazer
+Investimentos
+Outros Gastos
+Alimentação
