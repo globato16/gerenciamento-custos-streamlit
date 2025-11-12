@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import uuid
 from datetime import date
 from dateutil.relativedelta import relativedelta
+from decimal import Decimal, ROUND_DOWN
 
 # Nome do arquivo para persistência dos dados
 DATA_FILE = "dados_custos.csv"
@@ -15,14 +17,14 @@ CATEGORIES_GASTO_FILE = "categorias_gasto.txt"
 
 def load_categories_from_file(file_path, default_categories):
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             categories = [line.strip() for line in f if line.strip()]
             return categories if categories else default_categories
     except FileNotFoundError:
         return default_categories
 
 def save_categories_to_file(file_path, categories_list):
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         for category in categories_list:
             f.write(f"{category}\n")
 
@@ -36,7 +38,7 @@ PROFILES_FILE = "perfis.txt"
 
 def load_profiles():
     try:
-        with open(PROFILES_FILE, 'r') as f:
+        with open(PROFILES_FILE, 'r', encoding='utf-8') as f:
             profiles = [line.strip() for line in f if line.strip()]
             if not profiles:
                 return ['Principal']
@@ -45,7 +47,7 @@ def load_profiles():
         return ['Principal']
 
 def save_profiles(profiles_list):
-    with open(PROFILES_FILE, 'w') as f:
+    with open(PROFILES_FILE, 'w', encoding='utf-8') as f:
         for profile in profiles_list:
             f.write(f"{profile}\n")
 
@@ -63,22 +65,59 @@ def load_cards():
 def save_cards(df_cards):
     df_cards.to_csv(CARDS_FILE, index=False)
 
+# --- Função auxiliar: dividir valor em parcelas com centavos distribuídos ---
+def split_amount_into_installments(total_value, n_installments):
+    """
+    Divide total_value (float ou Decimal-compatível) em n_installments partes com 2 casas decimais,
+    garantindo que a soma das partes seja igual ao valor total (distribui os centavos extras nas primeiras parcelas).
+    Retorna lista de floats (comprimento n_installments).
+    """
+    if n_installments <= 0:
+        return []
+
+    total = Decimal(str(total_value))
+    base = (total / Decimal(n_installments)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    parts = [base for _ in range(n_installments)]
+    remainder = total - base * n_installments
+
+    cent = Decimal("0.01")
+    i = 0
+    while remainder >= cent - Decimal("0.0000001"):
+        parts[i] += cent
+        remainder -= cent
+        i += 1
+        if i >= n_installments:
+            i = 0
+
+    return [float(p) for p in parts]
+
 # --- Funções de dados (transações) ---
 def load_data(profile):
+    filename = f"{profile}_{DATA_FILE}"
     try:
-        df = pd.read_csv(f"{profile}_{DATA_FILE}")
+        df = pd.read_csv(filename)
         if not df.empty:
-            df['Data'] = pd.to_datetime(df['Data']).dt.date
+            # normaliza Data
+            if 'Data' in df.columns:
+                df['Data'] = pd.to_datetime(df['Data']).dt.date
+            # garantir colunas novas existam para compatibilidade com versões antigas
+            for col in ['PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
+                if col not in df.columns:
+                    df[col] = pd.NA
         return df
     except FileNotFoundError:
         # colunas novas relacionadas a cartão adicionadas ao schema
-        cols = ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas']
+        cols = ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao',
+                'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']
         return pd.DataFrame(columns=cols)
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do perfil {profile}: {e}")
+        return pd.DataFrame()
 
 def save_data(df, profile):
     # garantir formato de data serializável
     df_copy = df.copy()
-    if 'Data' in df_copy.columns:
+    if 'Data' in df_copy.columns and not df_copy.empty:
         df_copy['Data'] = pd.to_datetime(df_copy['Data']).dt.strftime('%Y-%m-%d')
     df_copy.to_csv(f"{profile}_{DATA_FILE}", index=False)
 
@@ -87,45 +126,82 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
     """
     Adiciona a transação ao dataframe. Se gerar_parcelas=True e num_parcelas>1,
     gera automaticamente linhas adicionais com datas incrementadas mensalmente.
+    Ajustes:
+      - quando lançado com cartão parcelado, cada parcela recebe o valor = total / N (com centavos distribuídos)
+      - adiciona coluna 'TotalCompra' com o valor total da compra (quando aplicável)
+      - adiciona coluna 'Grupo' com um UUID para ligar parcelas da mesma compra
     """
     # assegura colunas
-    for col in ['PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas']:
+    for col in ['PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
         if col not in df.columns:
             df[col] = pd.NA
+
+    # preparar valores de parcela se for parcelado
+    installments_values = None
+    num = None
+    if pago_com_cartao and num_parcelas:
+        try:
+            num = int(num_parcelas)
+            if num > 1:
+                installments_values = split_amount_into_installments(valor, num)
+        except Exception:
+            installments_values = None
+            num = None
+
+    # parcela atual (índice 1..N)
+    start_parcela = int(parcela_atual) if parcela_atual else 1
+
+    # Grupo: somente quando há parcelamento (num>1) e pagamento com cartão
+    grupo_id = str(uuid.uuid4()) if (pago_com_cartao and num and num > 1) else pd.NA
+
+    # TotalCompra: registrar o valor total da compra quando pago com cartão (parcelado ou não), senão pd.NA
+    total_compra_val = float(valor) if pago_com_cartao else pd.NA
+
+    # valor para a parcela atual (se parcelado) ou valor total se não for parcelado
+    if installments_values and num:
+        idx = max(1, min(start_parcela, num)) - 1
+        valor_parcela_atual = installments_values[idx]
+    else:
+        valor_parcela_atual = float(valor)
 
     # linha inicial (parcela atual informada)
     base = {
         'Data': pd.to_datetime(data).date() if not isinstance(data, date) else data,
         'Tipo': tipo,
         'Categoria': categoria,
-        'Descrição': descricao,
-        'Valor': float(valor),
+        'Descrição': descricao if not (installments_values and num) else f"{descricao} ({start_parcela}/{num})",
+        'Valor': float(valor_parcela_atual),
         'PagoComCartao': 'Sim' if pago_com_cartao else 'Não',
         'Cartao': cartao if pago_com_cartao else pd.NA,
-        'NumParcelas': int(num_parcelas) if (pago_com_cartao and num_parcelas) else pd.NA,
-        'ParcelaAtual': int(parcela_atual) if (pago_com_cartao and parcela_atual) else pd.NA,
-        'GerouParcelas': 'Sim' if gerar_parcelas else 'Não'
+        'NumParcelas': int(num) if (pago_com_cartao and num) else pd.NA,
+        'ParcelaAtual': int(start_parcela) if (pago_com_cartao and parcela_atual) else pd.NA,
+        'GerouParcelas': 'Sim' if gerar_parcelas else 'Não',
+        'TotalCompra': total_compra_val,
+        'Grupo': grupo_id
     }
     new_rows = [base]
 
     # se for cartão e o usuário optar por gerar parcelas automaticamente:
-    if pago_com_cartao and gerar_parcelas and num_parcelas and int(num_parcelas) > 1:
+    if pago_com_cartao and gerar_parcelas and installments_values and num and int(num) > 1:
         try:
-            num = int(num_parcelas)
-            start_parcela = int(parcela_atual) if parcela_atual else 1
             # gerar para as parcelas restantes (a partir de parcela_atual+1 até num)
             for p in range(start_parcela + 1, num + 1):
-                new_date = pd.to_datetime(data).date() + relativedelta(months=(p - start_parcela))
+                offset = p - start_parcela
+                new_date = pd.to_datetime(data).date() + relativedelta(months=offset)
                 row = base.copy()
                 row['Data'] = new_date
                 row['ParcelaAtual'] = p
-                # opcional: indicar no descr. que é parcela X/N
                 row['Descrição'] = f"{descricao} ({p}/{num})"
+                # ajustar valor da parcela p (index p-1)
+                row['Valor'] = float(installments_values[p - 1])
+                # manter TotalCompra e Grupo iguais
+                row['TotalCompra'] = total_compra_val
+                row['Grupo'] = grupo_id
                 new_rows.append(row)
         except Exception as e:
-            # se algo falhar, não interrompe; apenas não gera parcelas
             st.warning(f"Não foi possível gerar todas as parcelas automaticamente: {e}")
 
+    # Observação: se o usuário NÃO optou por gerar_parcelas, registramos apenas a parcela atual com o valor da parcela (não duplicamos o total).
     df_new = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     save_data(df_new, profile)
     return df_new
@@ -189,6 +265,9 @@ else:
         if df_all.empty:
             st.info("Sem dados para comparação de perfis.")
             return
+        if 'Pessoa' not in df_all.columns:
+            st.info("Dados não contém informação de perfil para comparação.")
+            return
         grouped = df_all.groupby(['Pessoa', 'Tipo'])['Valor'].sum().reset_index()
         fig = px.bar(grouped, x='Pessoa', y='Valor', color='Tipo', barmode='group', title="Comparativo de Entradas e Gastos por Perfil")
         fig.update_layout(template="plotly_white", yaxis_title="Valor (R$)")
@@ -239,8 +318,10 @@ else:
 
         # --- Filtros ---
         st.sidebar.subheader("Filtros - Análise Geral")
-        start_date = st.sidebar.date_input("Data Inicial", pd.to_datetime(df_all['Data']).dt.date.min())
-        end_date = st.sidebar.date_input("Data Final", pd.to_datetime(df_all['Data']).dt.date.max())
+        min_date = pd.to_datetime(df_all['Data']).dt.date.min()
+        max_date = pd.to_datetime(df_all['Data']).dt.date.max()
+        start_date = st.sidebar.date_input("Data Inicial", min_date if pd.notna(min_date) else date.today())
+        end_date = st.sidebar.date_input("Data Final", max_date if pd.notna(max_date) else date.today())
         # filtro por cartão opcional
         cards_df = load_cards()
         card_options = ['Todos'] + cards_df['Nome'].tolist() if not cards_df.empty else ['Todos']
@@ -254,29 +335,35 @@ else:
         # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações (Edição e Exclusão)")
 
-        # mostrar colunas adicionais relacionadas a cartão
-        cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual']]
+        # mostrar colunas adicionais relacionadas a cartão, incluindo TotalCompra e Grupo (apenas leitura)
+        cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        column_config = {
+            "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+            "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+            "TotalCompra": st.column_config.NumberColumn("TotalCompra (R$)", format="R$ %.2f", disabled=True),
+            "Grupo": st.column_config.TextColumn("Grupo", disabled=True),
+        }
+
+        display_df = df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show]
         edited_df = st.data_editor(
-            df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show],
+            display_df,
             use_container_width=True,
             num_rows="dynamic",
-            column_config={
-                "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
-                "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
-                "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            }
+            column_config=column_config
         )
 
-        if not edited_df.equals(df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show]):
-            # salvar de volta por perfil
+        if not edited_df.equals(display_df):
+            # salvar de volta por perfil (atenção para não sobrescrever linhas fora do filtro)
             for profile in profiles:
                 # pega linhas que pertencem ao perfil
                 if 'Pessoa' in edited_df.columns:
                     df_profile_updated = edited_df[edited_df["Pessoa"] == profile].drop(columns=["Pessoa"])
                 else:
                     df_profile_updated = edited_df
-                # carregar antigo e salvar
+                # carregar antigo e salvar (atenção: essa abordagem sobrescreve o arquivo do perfil com as linhas apresentadas;
+                # para evitar perda de dados, ideal seria mapear por índice/ID — mantive a atual por compatibilidade com seu fluxo)
                 save_data(df_profile_updated, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
@@ -352,18 +439,21 @@ else:
         # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações")
 
-        cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual']]
+        cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        column_config = {
+            "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+            "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
+            "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
+            "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+            "TotalCompra": st.column_config.NumberColumn("TotalCompra (R$)", format="R$ %.2f", disabled=True),
+            "Grupo": st.column_config.TextColumn("Grupo", disabled=True),
+        }
         edited_df = st.data_editor(
             df_profile[cols_to_show],
             key=f"data_editor_{profile}",
             use_container_width=True,
             num_rows="dynamic",
-            column_config={
-                "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
-                "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
-                "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            }
+            column_config=column_config
         )
 
         if not edited_df.equals(df_profile[cols_to_show]):
@@ -409,6 +499,7 @@ else:
         st.subheader("Remover Perfil")
         profile_to_remove = st.selectbox("Selecione o Perfil para Remover", profiles)
         if st.button("Remover Perfil"):
+            # Atenção: remover o perfil não remove automaticamente o arquivo de dados associado.
             profiles.remove(profile_to_remove)
             save_profiles(profiles)
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
