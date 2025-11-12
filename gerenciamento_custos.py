@@ -15,14 +15,14 @@ CATEGORIES_GASTO_FILE = "categorias_gasto.txt"
 
 def load_categories_from_file(file_path, default_categories):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r') as f:
             categories = [line.strip() for line in f if line.strip()]
             return categories if categories else default_categories
     except FileNotFoundError:
         return default_categories
 
 def save_categories_to_file(file_path, categories_list):
-    with open(file_path, 'w', encoding='utf-8') as f:
+    with open(file_path, 'w') as f:
         for category in categories_list:
             f.write(f"{category}\n")
 
@@ -36,7 +36,7 @@ PROFILES_FILE = "perfis.txt"
 
 def load_profiles():
     try:
-        with open(PROFILES_FILE, 'r', encoding='utf-8') as f:
+        with open(PROFILES_FILE, 'r') as f:
             profiles = [line.strip() for line in f if line.strip()]
             if not profiles:
                 return ['Principal']
@@ -45,7 +45,7 @@ def load_profiles():
         return ['Principal']
 
 def save_profiles(profiles_list):
-    with open(PROFILES_FILE, 'w', encoding='utf-8') as f:
+    with open(PROFILES_FILE, 'w') as f:
         for profile in profiles_list:
             f.write(f"{profile}\n")
 
@@ -65,25 +65,20 @@ def save_cards(df_cards):
 
 # --- Funções de dados (transações) ---
 def load_data(profile):
-    filename = f"{profile}_{DATA_FILE}"
     try:
-        df = pd.read_csv(filename)
+        df = pd.read_csv(f"{profile}_{DATA_FILE}")
         if not df.empty:
-            # normaliza Data
             df['Data'] = pd.to_datetime(df['Data']).dt.date
         return df
     except FileNotFoundError:
         # colunas novas relacionadas a cartão adicionadas ao schema
         cols = ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas']
         return pd.DataFrame(columns=cols)
-    except Exception as e:
-        st.error(f"Erro ao carregar dados do perfil {profile}: {e}")
-        return pd.DataFrame()
 
 def save_data(df, profile):
     # garantir formato de data serializável
     df_copy = df.copy()
-    if 'Data' in df_copy.columns and not df_copy.empty:
+    if 'Data' in df_copy.columns:
         df_copy['Data'] = pd.to_datetime(df_copy['Data']).dt.strftime('%Y-%m-%d')
     df_copy.to_csv(f"{profile}_{DATA_FILE}", index=False)
 
@@ -124,7 +119,7 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
                 row = base.copy()
                 row['Data'] = new_date
                 row['ParcelaAtual'] = p
-                # indicar no descr. que é parcela X/N
+                # opcional: indicar no descr. que é parcela X/N
                 row['Descrição'] = f"{descricao} ({p}/{num})"
                 new_rows.append(row)
         except Exception as e:
@@ -140,8 +135,15 @@ st.set_page_config(layout="wide", page_title="Gerenciamento de Custos Pessoais")
 
 # --- Autenticação Básica ---
 # Recomendo mover USERNAME/PASSWORD para st.secrets em produção.
-USERNAME = st.secrets.get("USERNAME", "familia") if hasattr(st, "secrets") else "familia"
-PASSWORD = st.secrets.get("PASSWORD", "cabuloso") if hasattr(st, "secrets") else "cabuloso"
+try:
+    # Tentar acessar st.secrets; pode lançar StreamlitSecretNotFoundError se não houver secrets configurado
+    secrets = st.secrets
+    USERNAME = secrets.get("USERNAME", os.environ.get("APP_USERNAME", "familia"))
+    PASSWORD = secrets.get("PASSWORD", os.environ.get("APP_PASSWORD", "cabuloso"))
+except Exception:
+    # Fallback para variáveis de ambiente ou valores padrão
+    USERNAME = os.environ.get("APP_USERNAME", "familia")
+    PASSWORD = os.environ.get("APP_PASSWORD", "cabuloso")
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -187,9 +189,6 @@ else:
         if df_all.empty:
             st.info("Sem dados para comparação de perfis.")
             return
-        if 'Pessoa' not in df_all.columns:
-            st.info("Dados não contém informação de perfil para comparação.")
-            return
         grouped = df_all.groupby(['Pessoa', 'Tipo'])['Valor'].sum().reset_index()
         fig = px.bar(grouped, x='Pessoa', y='Valor', color='Tipo', barmode='group', title="Comparativo de Entradas e Gastos por Perfil")
         fig.update_layout(template="plotly_white", yaxis_title="Valor (R$)")
@@ -228,10 +227,9 @@ else:
         for profile in profiles:
             df_profile = load_data(profile)
             if not df_profile.empty:
-                # manter índice original do perfil para mapear edições
-                df_profile_r = df_profile.reset_index().rename(columns={'index': '__orig_index'})
-                df_profile_r["Pessoa"] = profile
-                all_data.append(df_profile_r)
+                df_profile = df_profile.copy()
+                df_profile["Pessoa"] = profile
+                all_data.append(df_profile)
 
         if not all_data:
             st.info("Nenhuma transação cadastrada.")
@@ -241,11 +239,8 @@ else:
 
         # --- Filtros ---
         st.sidebar.subheader("Filtros - Análise Geral")
-        # garantir limites válidos para date_input
-        min_date = pd.to_datetime(df_all['Data']).dt.date.min()
-        max_date = pd.to_datetime(df_all['Data']).dt.date.max()
-        start_date = st.sidebar.date_input("Data Inicial", min_date if pd.notna(min_date) else date.today())
-        end_date = st.sidebar.date_input("Data Final", max_date if pd.notna(max_date) else date.today())
+        start_date = st.sidebar.date_input("Data Inicial", pd.to_datetime(df_all['Data']).dt.date.min())
+        end_date = st.sidebar.date_input("Data Final", pd.to_datetime(df_all['Data']).dt.date.max())
         # filtro por cartão opcional
         cards_df = load_cards()
         card_options = ['Todos'] + cards_df['Nome'].tolist() if not cards_df.empty else ['Todos']
@@ -261,89 +256,28 @@ else:
 
         # mostrar colunas adicionais relacionadas a cartão
         cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual']]
-        # incluir colunas de controle para mapear salvamentos
-        display_cols = cols_to_show + ['Pessoa', '__orig_index']
-
-        # configurar colunas para serem apenas leitura onde necessário
-        column_config = {
-            "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
-            "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            "Pessoa": st.column_config.TextColumn("Pessoa", disabled=True),
-            "__orig_index": st.column_config.NumberColumn("__orig_index", disabled=True),
-        }
-
-        # exibir editor com colunas de mapeamento
         edited_df = st.data_editor(
-            df_filtered[display_cols],
+            df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show],
             use_container_width=True,
             num_rows="dynamic",
-            column_config=column_config
+            column_config={
+                "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
+                "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
+                "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+            }
         )
 
-        # detectar alterações comparando apenas os dados exibidos originais com os editados
-        # Para segurança, vamos aplicar alterações por perfil, fazendo merge com os dados completos do perfil.
-        # NOTA: edited_df contém __orig_index para linhas originais; linhas novas terão NaN nesse campo.
-        if not edited_df.equals(df_filtered[display_cols]):
-            # para cada perfil, aplicar mudanças ao arquivo do perfil sem sobrescrever linhas fora do filtro
+        if not edited_df.equals(df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show]):
+            # salvar de volta por perfil
             for profile in profiles:
-                # linhas editadas pertencentes ao perfil
-                edited_profile = edited_df[edited_df['Pessoa'] == profile].copy()
-                # recarregar dataset completo do perfil
-                full_profile_df = load_data(profile)
-                # criar coluna de mapeamento com índices originais
-                if full_profile_df.empty:
-                    full_profile_r = full_profile_df.reset_index().rename(columns={'index': '__orig_index'})
+                # pega linhas que pertencem ao perfil
+                if 'Pessoa' in edited_df.columns:
+                    df_profile_updated = edited_df[edited_df["Pessoa"] == profile].drop(columns=["Pessoa"])
                 else:
-                    full_profile_r = full_profile_df.reset_index().rename(columns={'index': '__orig_index'})
-
-                # índices originais que pertenciam à view (antes das edições)
-                original_view_idx = df_filtered[df_filtered['Pessoa'] == profile]['__orig_index'].tolist()
-
-                # se não houver linhas editadas para esse perfil e não havia nada no view, pular
-                if edited_profile.empty and not original_view_idx:
-                    continue
-
-                # 1) Deleções: linhas que estavam na view original mas não estão mais no edited_profile
-                edited_idx_present = edited_profile['__orig_index'].dropna().astype('Int64').tolist() if not edited_profile.empty else []
-                indices_to_remove = [int(i) for i in original_view_idx if int(i) not in [int(x) for x in edited_idx_present]]
-
-                if indices_to_remove and not full_profile_r.empty:
-                    full_profile_r = full_profile_r[~full_profile_r['__orig_index'].isin(indices_to_remove)].copy()
-
-                # 2) Atualizações: para cada linha editada que possui __orig_index, atualizar a linha correspondente
-                for _, row in edited_profile.dropna(subset=['__orig_index']).iterrows():
-                    orig_idx = int(row['__orig_index'])
-                    # localizar na tabela do perfil
-                    mask = full_profile_r['__orig_index'] == orig_idx
-                    if mask.any():
-                        # atualizar colunas mostradas
-                        for col in cols_to_show:
-                            if col in full_profile_r.columns:
-                                full_profile_r.loc[mask, col] = row[col]
-                            else:
-                                # se coluna não existia (ex: novas colunas), adiciona
-                                full_profile_r.loc[mask, col] = row[col]
-                    else:
-                        # se não encontrou, trata como nova linha (append)
-                        new_row = {c: row[c] for c in cols_to_show if c in row.index}
-                        full_profile_r = pd.concat([full_profile_r, pd.DataFrame([new_row])], ignore_index=True)
-
-                # 3) Inserções: linhas novas (sem __orig_index) -> adicionar ao final
-                new_rows = edited_profile[edited_profile['__orig_index'].isna()].copy()
-                if not new_rows.empty:
-                    to_append = new_rows[cols_to_show].copy()
-                    # note: Data pode estar em formato datetime.date; manter consistência
-                    full_profile_r = pd.concat([full_profile_r, to_append], ignore_index=True)
-
-                # por fim, remover a coluna de mapeamento e salvar
-                if '__orig_index' in full_profile_r.columns:
-                    full_profile_r = full_profile_r.drop(columns=['__orig_index'])
-                # resetar índices
-                full_profile_r = full_profile_r.reset_index(drop=True)
-                save_data(full_profile_r, profile)
-
+                    df_profile_updated = edited_df
+                # carregar antigo e salvar
+                save_data(df_profile_updated, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
 
@@ -475,7 +409,6 @@ else:
         st.subheader("Remover Perfil")
         profile_to_remove = st.selectbox("Selecione o Perfil para Remover", profiles)
         if st.button("Remover Perfil"):
-            # Atenção: remover o perfil não remove automaticamente o arquivo de dados associado.
             profiles.remove(profile_to_remove)
             save_profiles(profiles)
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
