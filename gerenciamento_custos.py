@@ -9,8 +9,8 @@ DATA_FILE = "dados_custos.csv" # Usado para testes locais
 # WORKSHEET_NAME = "Transacoes" # Nome da aba na planilha
 
 # --- Funções de Gerenciamento de Categorias ---
-CATEGORIES_ENTRADA_FILE = "gerenciamento_custos/categorias_entrada.txt"
-CATEGORIES_GASTO_FILE = "gerenciamento_custos/categorias_gasto.txt"
+CATEGORIES_ENTRADA_FILE = "categorias_entrada.txt"
+CATEGORIES_GASTO_FILE = "categorias_gasto.txt"
 
 def load_categories_from_file(file_path, default_categories):
     try:
@@ -45,7 +45,7 @@ METAS_GASTOS = {
 }
 
 # --- Funções de Gerenciamento de Perfis ---
-PROFILES_FILE = "gerenciamento_custos/perfis.txt"
+PROFILES_FILE = "perfis.txt"
 
 def load_profiles():
     try:
