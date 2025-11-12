@@ -254,7 +254,7 @@ else:
         if df_filtered.empty:
             st.info("Nenhuma transação disponível para edição.")
         else:
-        edited_df = st.data_editor(
+            edited_df = st.data_editor(
             df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show],
             use_container_width=True,
             num_rows="dynamic",
@@ -356,7 +356,7 @@ else:
         if df_filtered.empty:
             st.info("Nenhuma transação disponível para edição.")
         else:
-        edited_df = st.data_editor(
+            edited_df = st.data_editor(
             df_profile[cols_to_show],
             key=f"data_editor_{profile}",
             use_container_width=True,
