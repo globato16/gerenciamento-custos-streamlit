@@ -183,6 +183,7 @@ else:
 
         df_all = pd.concat(all_data, ignore_index=True)
 
+        # --- Filtros ---
         st.sidebar.subheader("Filtros - Análise Geral")
         start_date = st.sidebar.date_input("Data Inicial", df_all['Data'].min())
         end_date = st.sidebar.date_input("Data Final", df_all['Data'].max())
@@ -190,16 +191,7 @@ else:
 
         st.write(f"Período selecionado: **{start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}**")
 
-        st.subheader("📈 Gráfico de Tendência")
-        plot_trend_chart(df_filtered)
-
-        st.subheader("🍕 Distribuição de Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
-
-        st.subheader("👥 Comparativo entre Perfis")
-        plot_profile_comparison(df_filtered)
-
-        st.markdown("---")
+        # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações (Edição e Exclusão)")
 
         edited_df = st.data_editor(
@@ -220,6 +212,17 @@ else:
                 save_data(df_profile_updated, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
+
+        # --- Gráficos depois ---
+        st.markdown("---")
+        st.subheader("📈 Gráfico de Tendência")
+        plot_trend_chart(df_filtered)
+
+        st.subheader("🍕 Distribuição de Gastos por Categoria")
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
+
+        st.subheader("👥 Comparativo entre Perfis")
+        plot_profile_comparison(df_filtered)
 
     # --- Aba de Perfil ---
     def profile_tab(profile):
@@ -246,27 +249,13 @@ else:
             st.info("Nenhuma transação neste perfil.")
             return
 
-        # --- Filtros e Gráficos ---
+        # --- Filtros de data ---
         st.subheader("📅 Filtros de Análise")
         start_date = st.date_input("Data Inicial", df_profile['Data'].min(), key=f"start_{profile}")
         end_date = st.date_input("Data Final", df_profile['Data'].max(), key=f"end_{profile}")
-
         df_filtered = df_profile[(df_profile['Data'] >= pd.to_datetime(start_date)) & (df_profile['Data'] <= pd.to_datetime(end_date))]
 
-        st.subheader("📈 Tendência de Gastos e Entradas")
-        plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
-
-        st.subheader("🍕 Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
-
-        df_filtered['Ano-Mês'] = df_filtered['Data'].dt.to_period('M').astype(str)
-        resumo = df_filtered.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
-        resumo['Saldo'] = resumo.get('Entrada', 0) - resumo.get('Gasto', 0)
-
-        st.subheader("📊 Resumo Mensal")
-        st.dataframe(resumo)
-
-        st.markdown("---")
+        # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações")
 
         edited_df = st.data_editor(
@@ -286,6 +275,21 @@ else:
             save_data(edited_df, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
+
+        # --- Gráficos depois ---
+        st.markdown("---")
+        st.subheader("📈 Tendência de Gastos e Entradas")
+        plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
+
+        st.subheader("🍕 Gastos por Categoria")
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
+
+        df_filtered['Ano-Mês'] = df_filtered['Data'].dt.to_period('M').astype(str)
+        resumo = df_filtered.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
+        resumo['Saldo'] = resumo.get('Entrada', 0) - resumo.get('Gasto', 0)
+
+        st.subheader("📊 Resumo Mensal")
+        st.dataframe(resumo)
 
     # --- Aba de Perfis ---
     def manage_profiles_tab():
