@@ -1,6 +1,0 @@
-pandas
-streamlit
-plotly
-openpyxl # Necessário para ler/escrever arquivos Excel, boa prática incluir
-datetime # Biblioteca padrão, mas bom para clareza
-gspread
