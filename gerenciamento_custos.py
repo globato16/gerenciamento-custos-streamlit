@@ -631,6 +631,5 @@ else:
             save_config(config)
             st.success("Configurações salvas.")
 
-# ====== Inicialização ======
 if _name_ == "_main_":
     main()
