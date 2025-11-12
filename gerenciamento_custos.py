@@ -10,6 +10,41 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal, ROUND_DOWN
 
+# Helper: safe rerun (works even if experimental API missing)
+def safe_rerun():
+    """
+    Try to rerun the app safely. Prefer st.experimental_rerun() if available.
+    If not, increment a session_state counter and call st.stop() to force Streamlit to stop
+    the current run and re-render. This avoids AttributeError when experimental APIs are not present.
+    """
+    try:
+        # Preferred: experimental rerun
+        if hasattr(st, "experimental_rerun"):
+            st.experimental_rerun()
+            return
+    except Exception:
+        logging.exception("st.experimental_rerun failed")
+
+    try:
+        # Try st.rerun if available
+        if hasattr(st, "rerun"):
+            st.rerun()
+            return
+    except Exception:
+        logging.exception("st.rerun failed")
+
+    # Fallback: set a flag and stop execution so Streamlit re-renders
+    try:
+        st.session_state['_safe_rerun_count'] = st.session_state.get('_safe_rerun_count', 0) + 1
+    except Exception:
+        logging.exception("Could not set _safe_rerun_count in session_state")
+    try:
+        st.stop()
+    except Exception:
+        # last resort: do nothing (no rerun available)
+        return
+
+
 # Nome do arquivo para persistência dos dados
 DATA_FILE = "dados_custos.csv"
 CARDS_FILE = "cartoes.csv"  # armazena cartões: Nome,Bandeira,Dono,DiaFechamento
@@ -164,7 +199,11 @@ def save_data(df, profile):
         os.replace(tmp, final)
     except Exception:
         # fallback se replace falhar
-        os.remove(final) if os.path.exists(final) else None
+        try:
+            if os.path.exists(final):
+                os.remove(final)
+        except Exception:
+            pass
         os.replace(tmp, final)
 
 def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
@@ -330,7 +369,7 @@ if not st.session_state['logged_in']:
             if username == USERNAME and password == PASSWORD:
                 st.session_state['logged_in'] = True
                 st.success("Login realizado com sucesso!")
-                st.rerun()
+                safe_rerun()
             else:
                 st.error("Usuário ou senha incorretos.")
 else:
@@ -524,7 +563,7 @@ else:
                             df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df_full, profile)
             st.success("Transações atualizadas com sucesso!")
-            st.rerun()
+            safe_rerun()
 
         # --- Gráficos depois ---
         st.markdown("---")
@@ -627,7 +666,7 @@ else:
                     reset_transaction_fields(profile, card_names=card_names)
 
                     # Forçar rerun para aplicar os novos valores no formulário e na UI
-                    st.experimental_rerun()
+                    safe_rerun()
 
         # --- Metas (form separado) ---
         st.sidebar.markdown("---")
@@ -645,7 +684,7 @@ else:
                 }
                 save_goals(goals)
                 st.success("Metas salvas.")
-                st.rerun()
+                safe_rerun()
 
         if df_profile.empty:
             st.info("Nenhuma transação neste perfil.")
@@ -697,7 +736,7 @@ else:
                         df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
             save_data(df_full, profile)
             st.success("Transações atualizadas com sucesso!")
-            st.rerun()
+            safe_rerun()
 
         # --- Gráficos depois ---
         st.markdown("---")
@@ -759,7 +798,7 @@ else:
                     profiles.append(new_profile)
                     save_profiles(profiles)
                     st.success(f"Perfil '{new_profile}' adicionado com sucesso!")
-                    st.rerun()
+                    safe_rerun()
                 else:
                     st.warning("Este perfil já existe.")
 
@@ -769,7 +808,7 @@ else:
             profiles.remove(profile_to_remove)
             save_profiles(profiles)
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
-            st.rerun()
+            safe_rerun()
 
     # --- Aba de Categorias ---
     def manage_categories_tab():
@@ -786,7 +825,7 @@ else:
                     CATEGORIAS_ENTRADA.append(new_entrada)
                     save_categories_to_file(CATEGORIES_ENTRADA_FILE, CATEGORIAS_ENTRADA)
                     st.success(f"Categoria '{new_entrada}' adicionada.")
-                    st.rerun()
+                    safe_rerun()
 
         st.subheader("Categorias de Gasto")
         st.write(", ".join(CATEGORIAS_GASTO))
@@ -796,9 +835,9 @@ else:
             if submitted_gasto and new_gasto:
                 if new_gasto not in CATEGORIAS_GASTO:
                     CATEGORIAS_GASTO.append(new_gasto)
-                    save_categories_to_file(CATEGORIES_GASTO_FILE, CATEGORIAS_GASTO)
+                    save_categories_to_file(CATEGORIES_GASTO_FILE, CATEGORIES_GASTO)
                     st.success(f"Categoria '{new_gasto}' adicionada.")
-                    st.rerun()
+                    safe_rerun()
 
     # --- Aba de Cartões ---
     def manage_cards_tab():
@@ -830,13 +869,13 @@ else:
                         cards_df.loc[cards_df['Nome'] == nome, ['Bandeira', 'Dono', 'DiaFechamento']] = [bandeira, dono, int(dia_fech)]
                         save_cards(cards_df)
                         st.success("Cartão atualizado.")
-                        st.rerun()
+                        safe_rerun()
                     else:
                         new_row = pd.DataFrame([{'Nome': nome, 'Bandeira': bandeira, 'Dono': dono, 'DiaFechamento': int(dia_fech)}])
                         cards_df = pd.concat([cards_df, new_row], ignore_index=True)
                         save_cards(cards_df)
                         st.success("Cartão adicionado.")
-                        st.rerun()
+                        safe_rerun()
 
         st.subheader("Remover Cartão")
         if not cards_df.empty:
@@ -845,7 +884,7 @@ else:
                 cards_df = cards_df[cards_df['Nome'] != card_to_remove]
                 save_cards(cards_df)
                 st.success("Cartão removido.")
-                st.rerun()
+                safe_rerun()
 
     if __name__ == "__main__":
         main()
