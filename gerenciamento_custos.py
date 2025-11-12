@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import os
 import uuid
 import json
+import logging
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal, ROUND_DOWN
@@ -113,47 +114,69 @@ def split_amount_into_installments(total_value, n_installments):
     return [float(p) for p in parts]
 
 # --- Funções de dados (transações) ---
+def _new_id():
+    return str(uuid.uuid4())
+
 def load_data(profile):
+    """
+    Carrega arquivo CSV do perfil. Garante colunas novas e gera ID para linhas antigas sem ID.
+    """
     filename = f"{profile}_{DATA_FILE}"
     try:
         df = pd.read_csv(filename)
         if not df.empty:
-            # normaliza Data
             if 'Data' in df.columns:
                 df['Data'] = pd.to_datetime(df['Data']).dt.date
             # garantir colunas novas existam para compatibilidade com versões antigas
-            for col in ['PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
+            for col in ['ID', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
                 if col not in df.columns:
                     df[col] = pd.NA
+            # preencher IDs vazios
+            if 'ID' in df.columns:
+                df['ID'] = df['ID'].fillna('').astype(str)
+                for i, val in df['ID'].items():
+                    if not val:
+                        df.at[i, 'ID'] = _new_id()
+        else:
+            # criar df com colunas esperadas
+            cols = ['ID','Data','Tipo','Categoria','Descrição','Valor','PagoComCartao','Cartao','NumParcelas','ParcelaAtual','GerouParcelas','TotalCompra','Grupo']
+            df = pd.DataFrame(columns=cols)
         return df
     except FileNotFoundError:
-        # colunas novas relacionadas a cartão adicionadas ao schema
-        cols = ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao',
-                'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']
+        cols = ['ID','Data','Tipo','Categoria','Descrição','Valor','PagoComCartao','Cartao','NumParcelas','ParcelaAtual','GerouParcelas','TotalCompra','Grupo']
         return pd.DataFrame(columns=cols)
     except Exception as e:
         st.error(f"Erro ao carregar dados do perfil {profile}: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(columns=['ID','Data','Tipo','Categoria','Descrição','Valor'])
 
 def save_data(df, profile):
-    # garantir formato de data serializável
+    """
+    Salva de forma atômica para evitar corrupção (escreve .tmp e renomeia).
+    Formata Data para ISO antes de salvar.
+    """
     df_copy = df.copy()
     if 'Data' in df_copy.columns and not df_copy.empty:
         df_copy['Data'] = pd.to_datetime(df_copy['Data']).dt.strftime('%Y-%m-%d')
-    df_copy.to_csv(f"{profile}_{DATA_FILE}", index=False)
+    tmp = f"{profile}_{DATA_FILE}.tmp"
+    final = f"{profile}_{DATA_FILE}"
+    df_copy.to_csv(tmp, index=False)
+    try:
+        os.replace(tmp, final)
+    except Exception:
+        # fallback se replace falhar
+        os.remove(final) if os.path.exists(final) else None
+        os.replace(tmp, final)
 
 def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
                     pago_com_cartao=False, cartao=None, num_parcelas=None, parcela_atual=None, gerar_parcelas=False):
     """
     Adiciona a transação ao dataframe. Se gerar_parcelas=True e num_parcelas>1,
     gera automaticamente linhas adicionais com datas incrementadas mensalmente.
-    Ajustes:
-      - quando lançado com cartão parcelado, cada parcela recebe o valor = total / N (com centavos distribuídos)
-      - adiciona coluna 'TotalCompra' com o valor total da compra (quando aplicável)
-      - adiciona coluna 'Grupo' com um UUID para ligar parcelas da mesma compra
+
+    Agora cada linha recebe um ID único (coluna 'ID').
     """
     # assegura colunas
-    for col in ['PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
+    for col in ['ID', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'GerouParcelas', 'TotalCompra', 'Grupo']:
         if col not in df.columns:
             df[col] = pd.NA
 
@@ -175,7 +198,7 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
     # Grupo: somente quando há parcelamento (num>1) e pagamento com cartão
     grupo_id = str(uuid.uuid4()) if (pago_com_cartao and num and num > 1) else pd.NA
 
-    # TotalCompra: registrar o valor total da compra quando pago com cartão (parcelado ou não), senao pd.NA
+    # TotalCompra: registrar o valor total da compra quando pago com cartão (parcelado ou não), senão pd.NA
     total_compra_val = float(valor) if pago_com_cartao else pd.NA
 
     # valor para a parcela atual (se parcelado) ou valor total se não for parcelado
@@ -187,6 +210,7 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
 
     # linha inicial (parcela atual informada)
     base = {
+        'ID': _new_id(),
         'Data': pd.to_datetime(data).date() if not isinstance(data, date) else data,
         'Tipo': tipo,
         'Categoria': categoria,
@@ -210,6 +234,7 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
                 offset = p - start_parcela
                 new_date = pd.to_datetime(data).date() + relativedelta(months=offset)
                 row = base.copy()
+                row['ID'] = _new_id()
                 row['Data'] = new_date
                 row['ParcelaAtual'] = p
                 row['Descrição'] = f"{descricao} ({p}/{num})"
@@ -222,7 +247,6 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
         except Exception as e:
             st.warning(f"Não foi possível gerar todas as parcelas automaticamente: {e}")
 
-    # Observação: se o usuário NÃO optou por gerar_parcelas, registramos apenas a parcela atual com o valor da parcela (não duplicamos o total).
     df_new = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     save_data(df_new, profile)
     return df_new
@@ -230,13 +254,24 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
 # --- Helper: reset de campos relacionados à transação (sidebar e outros locais) ---
 def reset_transaction_fields(profile, card_names=None):
     """
-    Zera/define valores padrão para todas as chaves de session_state relacionadas ao formulário de transação.
-    Procura por keys que terminam com _{profile} e aplica padrão por prefixo.
+    Reseta apenas as chaves conhecidas relacionadas ao formulário de transação para um dado perfil.
+    Usa defaults com tipos compatíveis e registra erros via logging sem poluir a UI.
     """
-    suffix = f"_{profile}"
-    keys_to_reset = [k for k in list(st.session_state.keys()) if k.endswith(suffix)]
+    # prefixes padronizados usados pelo app
+    known_prefixes = [
+        "data",
+        "categoria_select",
+        "descricao",
+        "valor",
+        "pago_cartao",
+        "cartao_select",
+        "num_parcelas",
+        "parcela_atual",
+        "gerar_parcelas",
+        # não altere tipo_select salvo se desejar explicitamente
+    ]
 
-    # obter tipo atual (se existir) para escolher categoria padrão correta
+    # detectar tipo atual (se existir) para escolher categoria padrão correta
     tipo_key = f"tipo_select_{profile}"
     tipo_atual = st.session_state.get(tipo_key, "Gasto")
 
@@ -246,35 +281,29 @@ def reset_transaction_fields(profile, card_names=None):
     else:
         default_categoria = CATEGORIAS_GASTO[0] if len(CATEGORIAS_GASTO) > 0 else ""
 
-    for key in keys_to_reset:
-        # detecta prefixos conhecidos e atribui valor padrão apropriado
-        if key.startswith("data_"):
-            st.session_state[key] = pd.to_datetime(date.today()).date()
-        elif key.startswith("categoria_select_"):
-            st.session_state[key] = default_categoria
-        elif key.startswith("descricao_"):
-            st.session_state[key] = ""
-        elif key.startswith("valor_"):
-            st.session_state[key] = 0.0
-        elif key.startswith("pago_cartao_"):
-            st.session_state[key] = False
-        elif key.startswith("cartao_select_"):
-            st.session_state[key] = 'Selecione' if (card_names and len(card_names) > 0) else ''
-        elif key.startswith("num_parcelas_"):
-            st.session_state[key] = 1
-        elif key.startswith("parcela_atual_"):
-            st.session_state[key] = 1
-        elif key.startswith("gerar_parcelas_"):
-            st.session_state[key] = False
-        else:
-            # fallback: limpar valores genéricos
-            cur = st.session_state.get(key, None)
-            if isinstance(cur, bool):
-                st.session_state[key] = False
-            elif isinstance(cur, (int, float)):
-                st.session_state[key] = 0
-            else:
-                st.session_state[key] = ""
+    # mapa de defaults com tipos corretos (callables)
+    defaults = {
+        "data": lambda: pd.to_datetime(date.today()).date(),
+        "categoria_select": lambda: default_categoria,
+        "descricao": lambda: "",
+        "valor": lambda: 0.0,
+        "pago_cartao": lambda: False,
+        "cartao_select": lambda: ('Selecione' if (card_names and len(card_names) > 0) else ''),
+        "num_parcelas": lambda: 1,
+        "parcela_atual": lambda: 1,
+        "gerar_parcelas": lambda: False,
+    }
+
+    for p in known_prefixes:
+        key = f"{p}_{profile}"
+        if key in st.session_state:
+            try:
+                factory = defaults.get(p)
+                if factory is None:
+                    continue
+                st.session_state[key] = factory()
+            except Exception:
+                logging.exception(f"Falha ao resetar session_state['{key}']")
 
 # --- Configuração da Página ---
 st.set_page_config(layout="wide", page_title="Gerenciamento de Custos Pessoais")
@@ -338,12 +367,7 @@ else:
         fig.update_layout(template="plotly_white", yaxis_title="Valor (R$)")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Novas funções de plot para metas
     def plot_spending_vs_goal(resumo_df, meta_gasto, profile):
-        """
-        resumo_df: DataFrame com índice 'Ano-Mês' e colunas 'Entrada' e 'Gasto' (já calculado)
-        meta_gasto: float ou None
-        """
         if resumo_df.empty:
             st.info("Sem dados para exibir comparação com meta.")
             return
@@ -356,16 +380,12 @@ else:
         fig.update_layout(title=f"Gastos x Meta - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
 
-        # resumo textual
         if meta_gasto is not None:
             dfp['Excedeu'] = dfp['Gasto'] > meta_gasto
             excedeu_count = dfp['Excedeu'].sum()
             st.write(f"{excedeu_count} mês(es) superaram a meta de gasto.")
 
     def plot_sobra_vs_goal(resumo_df, meta_sobra_percent, profile):
-        """
-        mostra a sobra (Entrada - Gasto) e a meta de sobra (meta_percent% da Entrada) por mês.
-        """
         if resumo_df.empty:
             st.info("Sem dados para exibir comparação de sobra com meta.")
             return
@@ -380,7 +400,6 @@ else:
         fig.update_layout(title=f"Sobra x Meta de Sobra - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
 
-        # resumo textual
         if meta_sobra_percent is not None:
             dfp['AtingiuSobra'] = dfp['Sobra'] >= dfp['MetaSobra']
             atingiu_count = dfp['AtingiuSobra'].sum()
@@ -435,7 +454,6 @@ else:
         max_date = pd.to_datetime(df_all['Data']).dt.date.max()
         start_date = st.sidebar.date_input("Data Inicial", min_date if pd.notna(min_date) else date.today())
         end_date = st.sidebar.date_input("Data Final", max_date if pd.notna(max_date) else date.today())
-        # filtro por cartão opcional
         cards_df = load_cards()
         card_options = ['Todos'] + cards_df['Nome'].tolist() if not cards_df.empty else ['Todos']
         selected_card = st.sidebar.selectbox("Filtrar por Cartão (opcional)", card_options)
@@ -448,8 +466,9 @@ else:
         # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações (Edição e Exclusão)")
 
-        # mostrar colunas adicionais relacionadas a cartão, incluindo TotalCompra e Grupo (apenas leitura)
-        cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        cols_to_show = [c for c in df_filtered.columns if c in ['ID','Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        display_df = df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show]
+
         column_config = {
             "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
             "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
@@ -457,9 +476,9 @@ else:
             "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
             "TotalCompra": st.column_config.NumberColumn("TotalCompra (R$)", format="R$ %.2f", disabled=True),
             "Grupo": st.column_config.TextColumn("Grupo", disabled=True),
+            "ID": st.column_config.TextColumn("ID", disabled=True),
         }
 
-        display_df = df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show]
         edited_df = st.data_editor(
             display_df,
             use_container_width=True,
@@ -468,16 +487,42 @@ else:
         )
 
         if not edited_df.equals(display_df):
-            # salvar de volta por perfil (atenção para não sobrescrever linhas fora do filtro)
+            # atualizar por ID por perfil, evitando sobrescrever linhas não exibidas
             for profile in profiles:
-                # pega linhas que pertencem ao perfil
+                # linhas editadas do perfil
                 if 'Pessoa' in edited_df.columns:
-                    df_profile_updated = edited_df[edited_df["Pessoa"] == profile].drop(columns=["Pessoa"])
+                    edited_for_profile = edited_df[edited_df['Pessoa'] == profile].drop(columns=['Pessoa'])
                 else:
-                    df_profile_updated = edited_df
-                # carregar antigo e salvar (atenção: essa abordagem sobrescreve o arquivo do perfil com as linhas apresentadas;
-                # para evitar perda de dados, ideal seria mapear por índice/ID — mantive a atual por compatibilidade com seu fluxo)
-                save_data(df_profile_updated, profile)
+                    edited_for_profile = edited_df
+                if edited_for_profile.empty:
+                    continue
+                df_full = load_data(profile)
+                # garantir coluna ID
+                if 'ID' not in df_full.columns:
+                    df_full['ID'] = df_full.apply(lambda _: _new_id(), axis=1)
+                for _, row in edited_for_profile.iterrows():
+                    rid = row.get('ID', None)
+                    if pd.isna(rid) or not rid:
+                        # linha sem ID: criar nova
+                        new_row = row.to_dict()
+                        new_row['ID'] = _new_id()
+                        df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
+                    else:
+                        mask = df_full['ID'] == rid
+                        if mask.any():
+                            # atualizar colunas presentes (preservando outras)
+                            for col in row.index:
+                                if col in df_full.columns:
+                                    df_full.loc[mask, col] = row[col]
+                                else:
+                                    # adiciona coluna nova se necessário
+                                    df_full[col] = pd.NA
+                                    df_full.loc[mask, col] = row[col]
+                        else:
+                            # ID não encontrado: adicionar como nova linha
+                            new_row = row.to_dict()
+                            df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
+                save_data(df_full, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
 
@@ -578,7 +623,7 @@ else:
                                                  pago_com_cartao, cartao, num_parcelas, parcela_atual, gerar_parcelas)
                     st.success("Transação adicionada com sucesso!")
 
-                    # Resetar todos os fields relacionados (sidebar e quaisquer outros que usem as mesmas keys)
+                    # Resetar todos os fields relacionados à transação
                     reset_transaction_fields(profile, card_names=card_names)
 
                     # Forçar rerun para aplicar os novos valores no formulário e na UI
@@ -615,7 +660,7 @@ else:
         # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações")
 
-        cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        cols_to_show = [c for c in df_profile.columns if c in ['ID','Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
         column_config = {
             "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
             "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
@@ -623,6 +668,7 @@ else:
             "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
             "TotalCompra": st.column_config.NumberColumn("TotalCompra (R$)", format="R$ %.2f", disabled=True),
             "Grupo": st.column_config.TextColumn("Grupo", disabled=True),
+            "ID": st.column_config.TextColumn("ID", disabled=True),
         }
         edited_df = st.data_editor(
             df_profile[cols_to_show],
@@ -633,7 +679,23 @@ else:
         )
 
         if not edited_df.equals(df_profile[cols_to_show]):
-            save_data(edited_df, profile)
+            # atualizar localmente por ID
+            df_full = load_data(profile)
+            for _, row in edited_df.iterrows():
+                rid = row.get('ID', None)
+                if pd.isna(rid) or not rid:
+                    new_row = row.to_dict()
+                    new_row['ID'] = _new_id()
+                    df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
+                else:
+                    mask = df_full['ID'] == rid
+                    if mask.any():
+                        for col in row.index:
+                            df_full.loc[mask, col] = row[col]
+                    else:
+                        new_row = row.to_dict()
+                        df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
+            save_data(df_full, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
 
@@ -645,12 +707,9 @@ else:
         st.subheader("🍕 Gastos por Categoria")
         plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
 
-        # --- Resumo mensal para metas e gráficos de comparação ---
         df_filtered_local = df_filtered.copy()
         df_filtered_local['Ano-Mês'] = pd.to_datetime(df_filtered_local['Data']).dt.to_period('M').astype(str)
-
         resumo = df_filtered_local.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
-        # garantir colunas Entrada/Gasto existam
         if 'Entrada' not in resumo.columns:
             resumo['Entrada'] = 0.0
         if 'Gasto' not in resumo.columns:
@@ -670,7 +729,6 @@ else:
         with st.expander("Metas atuais"):
             st.write(f"Meta de Gastos mensal: R$ {meta_gasto_val if meta_gasto_val not in (None, pd.NA) else 'Não definida'}")
             st.write(f"Meta de sobra: {meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else 'Não definida'} % da entrada")
-            # botão para download do arquivo metas.json
             if os.path.exists(GOALS_FILE):
                 with open(GOALS_FILE, "rb") as f:
                     metas_bytes = f.read()
@@ -683,7 +741,6 @@ else:
             else:
                 st.info("Arquivo metas.json não encontrado no diretório do app.")
 
-        # gráficos de comparação com metas
         plot_spending_vs_goal(resumo, meta_gasto_val if meta_gasto_val not in (None, pd.NA) else None, profile)
         plot_sobra_vs_goal(resumo, meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else None, profile)
 
@@ -709,7 +766,6 @@ else:
         st.subheader("Remover Perfil")
         profile_to_remove = st.selectbox("Selecione o Perfil para Remover", profiles)
         if st.button("Remover Perfil"):
-            # Atenção: remover o perfil não remove automaticamente o arquivo de dados associado.
             profiles.remove(profile_to_remove)
             save_profiles(profiles)
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
@@ -770,7 +826,6 @@ else:
                 if not nome:
                     st.warning("Insira o nome do cartão.")
                 else:
-                    # se já existe, atualiza
                     if nome in cards_df['Nome'].values:
                         cards_df.loc[cards_df['Nome'] == nome, ['Bandeira', 'Dono', 'DiaFechamento']] = [bandeira, dono, int(dia_fech)]
                         save_cards(cards_df)
