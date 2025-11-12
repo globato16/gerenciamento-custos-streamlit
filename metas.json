@@ -1,0 +1,10 @@
+{
+  "Principal": {
+    "meta_gasto": 1000.0,
+    "meta_sobra_percent": 20.0
+  },
+  "Filho 1": {
+    "meta_gasto": 500.0,
+    "meta_sobra_percent": 10.0
+  }
+}
