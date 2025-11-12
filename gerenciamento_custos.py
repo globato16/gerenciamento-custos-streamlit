@@ -126,9 +126,9 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
             # se algo falhar, não interrompe; apenas não gera parcelas
             st.warning(f"Não foi possível gerar todas as parcelas automaticamente: {e}")
 
-# Remove colunas totalmente NA antes de concatenar para evitar FutureWarning
-df_clean = df.dropna(axis=1, how='all')
-df_new = pd.concat([df_clean, pd.DataFrame(new_rows)], ignore_index=True)
+    # Remove colunas totalmente NA antes de concatenar para evitar FutureWarning
+    df_clean = df.dropna(axis=1, how='all')
+    df_new = pd.concat([df_clean, pd.DataFrame(new_rows)], ignore_index=True)
     save_data(df_new, profile)
     return df_new
 
@@ -152,7 +152,7 @@ if not st.session_state['logged_in']:
             if username == USERNAME and password == PASSWORD:
                 st.session_state['logged_in'] = True
                 st.success("Login realizado com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+                # Uso controlado do st.rerun para evitar loops infinitos
                 st.rerun()
             else:
                 st.error("Usuário ou senha incorretos.")
@@ -251,10 +251,10 @@ else:
 
         # mostrar colunas adicionais relacionadas a cartão
         cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual']]
-if df_filtered.empty:
-    st.info("Nenhuma transação disponível para edição.")
-else:
-            edited_df = st.data_editor(
+        if df_filtered.empty:
+            st.info("Nenhuma transação disponível para edição.")
+        else:
+        edited_df = st.data_editor(
             df_filtered[cols_to_show + ['Pessoa']] if 'Pessoa' in df_filtered.columns else df_filtered[cols_to_show],
             use_container_width=True,
             num_rows="dynamic",
@@ -277,7 +277,7 @@ else:
                 # carregar antigo e salvar
                 save_data(df_profile_updated, profile)
             st.success("Transações atualizadas com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+            # Uso controlado do st.rerun para evitar loops infinitos
             st.rerun()
 
         # --- Gráficos depois ---
@@ -336,7 +336,7 @@ else:
                     df_profile = add_transaction(df_profile, data, tipo, categoria, descricao, valor, profile,
                                                  pago_com_cartao, cartao, num_parcelas, parcela_atual, gerar_parcelas)
                     st.success("Transação adicionada com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+                    # Uso controlado do st.rerun para evitar loops infinitos
                     st.rerun()
 
         if df_profile.empty:
@@ -353,10 +353,10 @@ else:
         st.subheader("🧾 Tabela de Transações")
 
         cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual']]
-if df_filtered.empty:
-    st.info("Nenhuma transação disponível para edição.")
-else:
-            edited_df = st.data_editor(
+        if df_filtered.empty:
+            st.info("Nenhuma transação disponível para edição.")
+        else:
+        edited_df = st.data_editor(
             df_profile[cols_to_show],
             key=f"data_editor_{profile}",
             use_container_width=True,
@@ -372,7 +372,7 @@ else:
         if not edited_df.equals(df_profile[cols_to_show]):
             save_data(edited_df, profile)
             st.success("Transações atualizadas com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+            # Uso controlado do st.rerun para evitar loops infinitos
             st.rerun()
 
         # --- Gráficos depois ---
@@ -406,7 +406,7 @@ else:
                     profiles.append(new_profile)
                     save_profiles(profiles)
                     st.success(f"Perfil '{new_profile}' adicionado com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+                    # Uso controlado do st.rerun para evitar loops infinitos
                     st.rerun()
                 else:
                     st.warning("Este perfil já existe.")
@@ -417,7 +417,7 @@ else:
             profiles.remove(profile_to_remove)
             save_profiles(profiles)
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
-# Uso controlado do st.rerun para evitar loops infinitos
+            # Uso controlado do st.rerun para evitar loops infinitos
             st.rerun()
 
     # --- Aba de Categorias ---
@@ -435,7 +435,7 @@ else:
                     CATEGORIAS_ENTRADA.append(new_entrada)
                     save_categories_to_file(CATEGORIES_ENTRADA_FILE, CATEGORIAS_ENTRADA)
                     st.success(f"Categoria '{new_entrada}' adicionada.")
-# Uso controlado do st.rerun para evitar loops infinitos
+                    # Uso controlado do st.rerun para evitar loops infinitos
                     st.rerun()
 
         st.subheader("Categorias de Gasto")
@@ -448,7 +448,7 @@ else:
                     CATEGORIAS_GASTO.append(new_gasto)
                     save_categories_to_file(CATEGORIES_GASTO_FILE, CATEGORIAS_GASTO)
                     st.success(f"Categoria '{new_gasto}' adicionada.")
-# Uso controlado do st.rerun para evitar loops infinitos
+                    # Uso controlado do st.rerun para evitar loops infinitos
                     st.rerun()
 
     # --- Aba de Cartões ---
@@ -482,14 +482,14 @@ else:
                         cards_df.loc[cards_df['Nome'] == nome, ['Bandeira', 'Dono', 'DiaFechamento']] = [bandeira, dono, int(dia_fech)]
                         save_cards(cards_df)
                         st.success("Cartão atualizado.")
-# Uso controlado do st.rerun para evitar loops infinitos
+                        # Uso controlado do st.rerun para evitar loops infinitos
                         st.rerun()
                     else:
                         new_row = pd.DataFrame([{'Nome': nome, 'Bandeira': bandeira, 'Dono': dono, 'DiaFechamento': int(dia_fech)}])
                         cards_df = pd.concat([cards_df, new_row], ignore_index=True)
                         save_cards(cards_df)
                         st.success("Cartão adicionado.")
-# Uso controlado do st.rerun para evitar loops infinitos
+                        # Uso controlado do st.rerun para evitar loops infinitos
                         st.rerun()
 
         st.subheader("Remover Cartão")
@@ -499,7 +499,7 @@ else:
                 cards_df = cards_df[cards_df['Nome'] != card_to_remove]
                 save_cards(cards_df)
                 st.success("Cartão removido.")
-# Uso controlado do st.rerun para evitar loops infinitos
+                # Uso controlado do st.rerun para evitar loops infinitos
                 st.rerun()
 
     if __name__ == "__main__":
