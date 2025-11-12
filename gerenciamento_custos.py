@@ -175,7 +175,7 @@ def add_transaction(df, data, tipo, categoria, descricao, valor, profile,
     # Grupo: somente quando há parcelamento (num>1) e pagamento com cartão
     grupo_id = str(uuid.uuid4()) if (pago_com_cartao and num and num > 1) else pd.NA
 
-    # TotalCompra: registrar o valor total da compra quando pago com cartão (parcelado ou não), senão pd.NA
+    # TotalCompra: registrar o valor total da compra quando pago com cartão (parcelado ou não), senao pd.NA
     total_compra_val = float(valor) if pago_com_cartao else pd.NA
 
     # valor para a parcela atual (se parcelado) ou valor total se não for parcelado
@@ -280,14 +280,11 @@ def reset_transaction_fields(profile, card_names=None):
 st.set_page_config(layout="wide", page_title="Gerenciamento de Custos Pessoais")
 
 # --- Autenticação Básica ---
-# Recomendo mover USERNAME/PASSWORD para st.secrets em produção.
 try:
-    # Tentar acessar st.secrets; pode lançar StreamlitSecretNotFoundError se não houver secrets configurado
     secrets = st.secrets
     USERNAME = secrets.get("USERNAME", os.environ.get("APP_USERNAME", "familia"))
     PASSWORD = secrets.get("PASSWORD", os.environ.get("APP_PASSWORD", "cabuloso"))
 except Exception:
-    # Fallback para variáveis de ambiente ou valores padrão
     USERNAME = os.environ.get("APP_USERNAME", "familia")
     PASSWORD = os.environ.get("APP_PASSWORD", "cabuloso")
 
@@ -525,48 +522,49 @@ else:
         key_parcela_atual = f"parcela_atual_{profile}"
         key_gerar_parcelas = f"gerar_parcelas_{profile}"
 
-        # inicializar session_state com valores padrão caso ainda não existam
-        if key_data not in st.session_state:
-            st.session_state[key_data] = pd.to_datetime(date.today()).date()
-        if key_categoria not in st.session_state:
-            categorias_filtradas_init = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
-            st.session_state[key_categoria] = categorias_filtradas_init[0] if categorias_filtradas_init else ""
-        if key_descricao not in st.session_state:
-            st.session_state[key_descricao] = ""
-        if key_valor not in st.session_state:
-            st.session_state[key_valor] = 0.0
-        if key_pago_cartao not in st.session_state:
-            st.session_state[key_pago_cartao] = False
-        if key_cartao not in st.session_state:
-            st.session_state[key_cartao] = 'Selecione' if card_names else ''
-        if key_num_parcelas not in st.session_state:
-            st.session_state[key_num_parcelas] = 1
-        if key_parcela_atual not in st.session_state:
-            st.session_state[key_parcela_atual] = 1
-        if key_gerar_parcelas not in st.session_state:
-            st.session_state[key_gerar_parcelas] = False
-
-        categorias_filtradas = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
-
+        # --- FORMULÁRIO: adicionar transação (sidebar) ---
         with st.sidebar.form(f"add_transaction_form_{profile}"):
-            data = st.date_input("Data", value=st.session_state[key_data], key=key_data)
-            categoria = st.selectbox("Categoria", categorias_filtradas, index=categorias_filtradas.index(st.session_state.get(key_categoria)) if st.session_state.get(key_categoria) in categorias_filtradas else 0, key=key_categoria)
-            descricao = st.text_input("Descrição", value=st.session_state[key_descricao], key=key_descricao)
-            valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01, value=float(st.session_state[key_valor]), key=key_valor)
+            # inicializar valores padrão em session_state (somente se não existirem)
+            if key_data not in st.session_state:
+                st.session_state[key_data] = pd.to_datetime(date.today()).date()
+            if key_categoria not in st.session_state:
+                categorias_init = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
+                st.session_state[key_categoria] = categorias_init[0] if categorias_init else ""
+            if key_descricao not in st.session_state:
+                st.session_state[key_descricao] = ""
+            if key_valor not in st.session_state:
+                st.session_state[key_valor] = 0.0
+            if key_pago_cartao not in st.session_state:
+                st.session_state[key_pago_cartao] = False
+            if key_cartao not in st.session_state:
+                st.session_state[key_cartao] = 'Selecione' if card_names else ''
+            if key_num_parcelas not in st.session_state:
+                st.session_state[key_num_parcelas] = 1
+            if key_parcela_atual not in st.session_state:
+                st.session_state[key_parcela_atual] = 1
+            if key_gerar_parcelas not in st.session_state:
+                st.session_state[key_gerar_parcelas] = False
 
-            pago_com_cartao = st.checkbox("Pago com cartão de crédito?", value=st.session_state[key_pago_cartao], key=key_pago_cartao)
+            # CRIAR widgets usando APENAS key (não passar value)
+            data = st.date_input("Data", key=key_data)
+            categorias_filtradas = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
+            categoria = st.selectbox("Categoria", categorias_filtradas, key=key_categoria)
+            descricao = st.text_input("Descrição", key=key_descricao)
+            valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01, key=key_valor)
+
+            pago_com_cartao = st.checkbox("Pago com cartão de crédito?", key=key_pago_cartao)
             cartao = None
             num_parcelas = None
             parcela_atual = None
             gerar_parcelas = False
             if pago_com_cartao:
                 if card_names:
-                    cartao = st.selectbox("Cartão utilizado", ['Selecione'] + card_names, index=(0 if st.session_state[key_cartao] == 'Selecione' else (card_names.index(st.session_state[key_cartao]) + 1 if st.session_state[key_cartao] in card_names else 0)), key=key_cartao)
+                    cartao = st.selectbox("Cartão utilizado", ['Selecione'] + card_names, key=key_cartao)
                     if cartao == 'Selecione':
                         cartao = None
-                    num_parcelas = st.number_input("Número de parcelas (1 para à vista)", min_value=1, step=1, value=int(st.session_state[key_num_parcelas]), key=key_num_parcelas)
-                    parcela_atual = st.number_input("Parcela atual (ex: 1)", min_value=1, max_value=int(num_parcelas) if num_parcelas else 1, value=int(st.session_state[key_parcela_atual]), step=1, key=key_parcela_atual)
-                    gerar_parcelas = st.checkbox("Gerar automaticamente lançamentos das parcelas futuras?", value=st.session_state[key_gerar_parcelas], key=key_gerar_parcelas)
+                    num_parcelas = st.number_input("Número de parcelas (1 para à vista)", min_value=1, step=1, key=key_num_parcelas)
+                    parcela_atual = st.number_input("Parcela atual (ex: 1)", min_value=1, max_value=int(st.session_state.get(key_num_parcelas, 1)), step=1, key=key_parcela_atual)
+                    gerar_parcelas = st.checkbox("Gerar automaticamente lançamentos das parcelas futuras?", key=key_gerar_parcelas)
                 else:
                     st.info("Nenhum cartão cadastrado. Cadastre um cartão na aba 'Gerenciamento de Cartões' antes de usar esta opção.")
 
@@ -580,7 +578,7 @@ else:
                                                  pago_com_cartao, cartao, num_parcelas, parcela_atual, gerar_parcelas)
                     st.success("Transação adicionada com sucesso!")
 
-                    # RESETAR todos os campos relacionados à transação (sidebar e quaisquer outros campos que usam as mesmas keys)
+                    # Resetar todos os fields relacionados (sidebar e quaisquer outros que usem as mesmas keys)
                     reset_transaction_fields(profile, card_names=card_names)
 
                     # Forçar rerun para aplicar os novos valores no formulário e na UI
