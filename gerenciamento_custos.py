@@ -12,18 +12,25 @@ from decimal import Decimal, ROUND_DOWN
 
 # Helper: safe rerun (works even if experimental API missing)
 def safe_rerun():
+    """
+    Try to rerun the app safely. Prefer st.experimental_rerun() if available.
+    If not, increment a session_state counter and call st.stop() to force Streamlit to stop
+    the current run and re-render. This avoids AttributeError when experimental APIs are not present.
+    """
     try:
         if hasattr(st, "experimental_rerun"):
             st.experimental_rerun()
             return
     except Exception:
         logging.exception("st.experimental_rerun failed")
+
     try:
         if hasattr(st, "rerun"):
             st.rerun()
             return
     except Exception:
         logging.exception("st.rerun failed")
+
     try:
         st.session_state['_safe_rerun_count'] = st.session_state.get('_safe_rerun_count', 0) + 1
     except Exception:
@@ -32,6 +39,7 @@ def safe_rerun():
         st.stop()
     except Exception:
         return
+
 
 # Nome do arquivo para persistência dos dados
 DATA_FILE = "dados_custos.csv"
@@ -111,6 +119,11 @@ def save_goals(goals):
 
 # --- Função auxiliar: dividir valor em parcelas com centavos distribuídos ---
 def split_amount_into_installments(total_value, n_installments):
+    """
+    Divide total_value (float ou Decimal-compatível) em n_installments partes com 2 casas decimais,
+    garantindo que a soma das partes seja igual ao valor total (distribui os centavos extras nas primeiras parcelas).
+    Retorna lista de floats (comprimento n_installments).
+    """
     if n_installments <= 0:
         return []
 
@@ -494,13 +507,7 @@ else:
                 df_full = load_data(profile)
                 # para cada linha editada, tentar localizar pelo UID combinando com outras colunas na fonte original
                 for _, row in edited_for_profile.iterrows():
-                    # tentar achar candidate matching row in df_full by unique columns (UID if present)
-                    # As linhas exibidas no editor não contêm UID; precisamos localizar a linha correspondente.
-                    # Estratégia:
-                    # 1) tentar localizar por UID se o editor linha tiver coluna 'UID' (não mostrado, mas pode existir se alguém adicionou)
-                    # 2) caso contrário, tentar match heurístico por Data, Descrição, Valor, Cartao, ParcelaAtual e NumParcelas.
                     uid = None
-                    # if row contains UID column (rare), use it
                     if 'UID' in row.index and pd.notna(row['UID']) and row['UID']:
                         uid = row['UID']
                     updated = False
@@ -512,9 +519,7 @@ else:
                                     df_full.loc[mask, col] = row[col]
                             updated = True
                     else:
-                        # heuristic match
                         cond = pd.Series([True] * len(df_full))
-                        # match on Data, Valor, Descrição, Cartao (if present)
                         for col in ['Data', 'Valor', 'Descrição', 'Cartao', 'ParcelaAtual', 'NumParcelas']:
                             if col in row.index and col in df_full.columns:
                                 cond = cond & (df_full[col].astype(str) == str(row[col]))
@@ -526,10 +531,8 @@ else:
                                     df_full.at[idx, col] = row[col]
                             updated = True
                     if not updated:
-                        # não encontrado: adicionar como nova linha com UID
                         new_row = row.to_dict()
                         new_row['UID'] = _new_uid()
-                        # garantir colunas existentes
                         for k in ['UID','Data','Tipo','Categoria','Descrição','Valor','PagoComCartao','Cartao','NumParcelas','ParcelaAtual','GerouParcelas','TotalCompra','Grupo']:
                             if k not in new_row:
                                 new_row[k] = pd.NA
@@ -544,171 +547,10 @@ else:
         plot_trend_chart(df_filtered)
 
         st.subheader("🍕 Distribuição de Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto')
 
         st.subheader("👥 Comparativo entre Perfis")
         plot_profile_comparison(df_filtered)
-
-    # --- Aba de Perfil ---
-    def profile_tab(profile):
-        st.header(f"👤 Perfil: {profile}")
-
-        df_profile = load_data(profile)
-
-        # carregar metas para este perfil
-        goals = load_goals()
-        profile_goals = goals.get(profile, {})
-        meta_gasto_default = profile_goals.get('meta_gasto', None)
-        meta_sobra_percent_default = profile_goals.get('meta_sobra_percent', None)
-
-        st.sidebar.header(f"Adicionar Transação ({profile})")
-        tipo = st.sidebar.selectbox("Tipo", ["Entrada", "Gasto"], key=f"tipo_select_{profile}")
-
-        cards_df = load_cards()
-        card_names = cards_df['Nome'].tolist() if not cards_df.empty else []
-
-        key_data = f"data_{profile}"
-        key_categoria = f"categoria_select_{profile}"
-        key_descricao = f"descricao_{profile}"
-        key_valor = f"valor_{profile}"
-        key_pago_cartao = f"pago_cartao_{profile}"
-        key_cartao = f"cartao_select_{profile}"
-        key_num_parcelas = f"num_parcelas_{profile}"
-        key_parcela_atual = f"parcela_atual_{profile}"
-        key_gerar_parcelas = f"gerar_parcelas_{profile}"
-
-        with st.sidebar.form(f"add_transaction_form_{profile}"):
-            if key_data not in st.session_state:
-                st.session_state[key_data] = pd.to_datetime(date.today()).date()
-            if key_categoria not in st.session_state:
-                categorias_init = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
-                st.session_state[key_categoria] = categorias_init[0] if categorias_init else ""
-            if key_descricao not in st.session_state:
-                st.session_state[key_descricao] = ""
-            if key_valor not in st.session_state:
-                st.session_state[key_valor] = 0.0
-            if key_pago_cartao not in st.session_state:
-                st.session_state[key_pago_cartao] = False
-            if key_cartao not in st.session_state:
-                st.session_state[key_cartao] = 'Selecione' if card_names else ''
-            if key_num_parcelas not in st.session_state:
-                st.session_state[key_num_parcelas] = 1
-            if key_parcela_atual not in st.session_state:
-                st.session_state[key_parcela_atual] = 1
-            if key_gerar_parcelas not in st.session_state:
-                st.session_state[key_gerar_parcelas] = False
-
-            data = st.date_input("Data", key=key_data)
-            categorias_filtradas = CATEGORIAS_ENTRADA if tipo == "Entrada" else CATEGORIAS_GASTO
-            categoria = st.selectbox("Categoria", categorias_filtradas, key=key_categoria)
-            descricao = st.text_input("Descrição", key=key_descricao)
-            valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01, key=key_valor)
-
-            pago_com_cartao = st.checkbox("Pago com cartão de crédito?", key=key_pago_cartao)
-            cartao = None
-            num_parcelas = None
-            parcela_atual = None
-            gerar_parcelas = False
-            if pago_com_cartao:
-                if card_names:
-                    cartao = st.selectbox("Cartão utilizado", ['Selecione'] + card_names, key=key_cartao)
-                    if cartao == 'Selecione':
-                        cartao = None
-                    num_parcelas = st.number_input("Número de parcelas (1 para à vista)", min_value=1, step=1, key=key_num_parcelas)
-                    parcela_atual = st.number_input("Parcela atual (ex: 1)", min_value=1, max_value=int(st.session_state.get(key_num_parcelas, 1)), step=1, key=key_parcela_atual)
-                    gerar_parcelas = st.checkbox("Gerar automaticamente lançamentos das parcelas futuras?", key=key_gerar_parcelas)
-                else:
-                    st.info("Nenhum cartão cadastrado. Cadastre um cartão na aba 'Gerenciamento de Cartões' antes de usar esta opção.")
-
-            submitted = st.form_submit_button("Adicionar")
-            if submitted:
-                if pago_com_cartao and not cartao:
-                    st.warning("Selecione um cartão válido ou desmarque 'Pago com cartão'.")
-                else:
-                    df_profile = add_transaction(df_profile, data, tipo, categoria, descricao, valor, profile,
-                                                 pago_com_cartao, cartao, num_parcelas, parcela_atual, gerar_parcelas)
-                    st.success("Transação adicionada com sucesso!")
-                    reset_transaction_fields(profile, card_names=card_names)
-                    safe_rerun()
-
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Metas (mensal)")
-        with st.sidebar.form(f"metas_form_{profile}"):
-            meta_gasto = st.number_input("Meta de Gastos mensal (R$)", min_value=0.0, step=10.0, value=float(meta_gasto_default) if meta_gasto_default not in (None, pd.NA) else 0.0)
-            meta_sobra_percent = st.number_input("Meta de sobra (% da entrada)", min_value=0.0, max_value=100.0, step=1.0, value=float(meta_sobra_percent_default) if meta_sobra_percent_default not in (None, pd.NA) else 0.0)
-            save_meta = st.form_submit_button("Salvar Metas")
-            if save_meta:
-                goals = load_goals()
-                goals[profile] = {
-                    'meta_gasto': float(meta_gasto),
-                    'meta_sobra_percent': float(meta_sobra_percent)
-                }
-                save_goals(goals)
-                st.success("Metas salvas.")
-                safe_rerun()
-
-        if df_profile.empty:
-            st.info("Nenhuma transação neste perfil.")
-            return
-
-        # editor no perfil: não mostrar 'UID'
-        cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
-        edited_df = st.data_editor(
-            df_profile[cols_to_show],
-            key=f"data_editor_{profile}",
-            use_container_width=True,
-            num_rows="dynamic",
-            column_config={
-                "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
-                "Categoria": st.column_config.SelectboxColumn("Categoria", options=TODAS_CATEGORIAS),
-                "Valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-            }
-        )
-
-        if not edited_df.equals(df_profile[cols_to_show]):
-            # similar logic: merge usando UID heurístico
-            df_full = load_data(profile)
-            for _, row in edited_df.iterrows():
-                # try to match by UID if possible via heuristic: Data+Descrição+Valor+Cartao+ParcelaAtual+NumParcelas
-                cond = pd.Series([True] * len(df_full))
-                for col in ['Data','Descrição','Valor','Cartao','ParcelaAtual','NumParcelas']:
-                    if col in row.index and col in df_full.columns:
-                        cond = cond & (df_full[col].astype(str) == str(row[col]))
-                matches = df_full[cond]
-                if len(matches) == 1:
-                    idx = matches.index[0]
-                    for col in row.index:
-                        if col in df_full.columns:
-                            df_full.at[idx, col] = row[col]
-                else:
-                    # adicionar como nova linha com UID
-                    new_row = row.to_dict()
-                    new_row['UID'] = _new_uid()
-                    for k in ['UID','Data','Tipo','Categoria','Descrição','Valor','PagoComCartao','Cartao','NumParcelas','ParcelaAtual','GerouParcelas','TotalCompra','Grupo']:
-                        if k not in new_row:
-                            new_row[k] = pd.NA
-                    df_full = pd.concat([df_full, pd.DataFrame([new_row])], ignore_index=True)
-            save_data(df_full, profile)
-            st.success("Transações atualizadas com sucesso!")
-            safe_rerun()
-
-        # gráficos e resumo seguem igual...
-        st.markdown("---")
-        st.subheader("📈 Tendência de Gastos e Entradas")
-        df_filtered = df_profile[(pd.to_datetime(df_profile['Data']).dt.date >= pd.to_datetime(st.session_state.get(f"start_{profile}", df_profile['Data'].min())).date()) & (pd.to_datetime(df_profile['Data']).dt.date <= pd.to_datetime(st.session_state.get(f"end_{profile}", df_profile['Data'].max())).date())]
-        plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
-        st.subheader("🍕 Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
-
-        df_filtered_local = df_filtered.copy()
-        df_filtered_local['Ano-Mês'] = pd.to_datetime(df_filtered_local['Data']).dt.to_period('M').astype(str)
-        resumo = df_filtered_local.groupby(['Ano-Mês','Tipo'])['Valor'].sum().unstack(fill_value=0)
-        if 'Entrada' not in resumo.columns: resumo['Entrada'] = 0.0
-        if 'Gasto' not in resumo.columns: resumo['Gasto'] = 0.0
-        resumo['Saldo'] = resumo['Entrada'] - resumo['Gasto']
-        st.subheader("📊 Resumo Mensal")
-        st.dataframe(resumo)
 
     # --- Aba de Perfis ---
     def manage_profiles_tab():
@@ -716,6 +558,7 @@ else:
         profiles = load_profiles()
         st.subheader("Perfis Atuais")
         st.write(", ".join(profiles))
+
         with st.form("add_profile_form"):
             new_profile = st.text_input("Novo Perfil (Ex: 'Filho 1', 'Casa')").strip()
             submitted = st.form_submit_button("Adicionar Perfil")
@@ -727,6 +570,7 @@ else:
                     safe_rerun()
                 else:
                     st.warning("Este perfil já existe.")
+
         st.subheader("Remover Perfil")
         profile_to_remove = st.selectbox("Selecione o Perfil para Remover", profiles)
         if st.button("Remover Perfil"):
@@ -735,10 +579,11 @@ else:
             st.success(f"Perfil '{profile_to_remove}' removido com sucesso!")
             safe_rerun()
 
-    # --- Categorias / Cartões (mantidos sem alteração) ---
+    # --- Aba de Categorias ---
     def manage_categories_tab():
         st.header("📂 Gerenciamento de Categorias")
         global CATEGORIAS_ENTRADA, CATEGORIAS_GASTO
+
         st.subheader("Categorias de Entrada")
         st.write(", ".join(CATEGORIAS_ENTRADA))
         with st.form("add_entrada_form"):
@@ -750,6 +595,7 @@ else:
                     save_categories_to_file(CATEGORIES_ENTRADA_FILE, CATEGORIAS_ENTRADA)
                     st.success(f"Categoria '{new_entrada}' adicionada.")
                     safe_rerun()
+
         st.subheader("Categorias de Gasto")
         st.write(", ".join(CATEGORIAS_GASTO))
         with st.form("add_gasto_form"):
@@ -762,8 +608,10 @@ else:
                     st.success(f"Categoria '{new_gasto}' adicionada.")
                     safe_rerun()
 
+    # --- Aba de Cartões ---
     def manage_cards_tab():
         st.header("💳 Gerenciamento de Cartões")
+
         cards_df = load_cards()
         st.subheader("Cartões Cadastrados")
         if cards_df.empty:
@@ -772,6 +620,7 @@ else:
             display_df = cards_df.copy()
             display_df['DiaFechamento'] = display_df['DiaFechamento'].astype('Int64')
             st.dataframe(display_df)
+
         st.markdown("---")
         st.subheader("Adicionar / Atualizar Cartão")
         with st.form("add_card_form"):
@@ -796,6 +645,7 @@ else:
                         save_cards(cards_df)
                         st.success("Cartão adicionado.")
                         safe_rerun()
+
         st.subheader("Remover Cartão")
         if not cards_df.empty:
             card_to_remove = st.selectbox("Selecione o cartão para remover", cards_df['Nome'].tolist())
