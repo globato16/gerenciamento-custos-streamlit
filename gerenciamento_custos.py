@@ -630,7 +630,3 @@ else:
             config['dias_vencimento_alerta'] = dias_alerta
             save_config(config)
             st.success("Configurações salvas.")
-
-# ====== Inicialização ======
-if _name_ == "_main_":
-    main()
