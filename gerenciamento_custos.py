@@ -567,54 +567,54 @@ else:
 
         # --- Gráficos depois ---
 
-    # --- Resumo Financeiro ---
-    if not df_filtered.empty:
-        entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
-        gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
-        saldo_total = entrada_total - gasto_total
+        # --- Resumo Financeiro ---
+        if not df_filtered.empty:
+            entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
+            gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
+            saldo_total = entrada_total - gasto_total
 
-        st.markdown("---")
-        st.subheader("Resumo Financeiro")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
-        col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
-        col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
-        st.markdown("---")
-        st.subheader("📈 Tendência de Gastos e Entradas")
-        plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
+            st.markdown("---")
+            st.subheader("Resumo Financeiro")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
+            col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
+            col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+            st.markdown("---")
+            st.subheader("📈 Tendência de Gastos e Entradas")
+            plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
 
-        st.subheader("🍕 Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
+            st.subheader("🍕 Gastos por Categoria")
+            plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}")
 
-        # --- Resumo mensal para metas e gráficos de comparação ---
-        df_filtered_local = df_filtered.copy()
-        df_filtered_local['Ano-Mês'] = pd.to_datetime(df_filtered_local['Data']).dt.to_period('M').astype(str)
+            # --- Resumo mensal para metas e gráficos de comparação ---
+            df_filtered_local = df_filtered.copy()
+            df_filtered_local['Ano-Mês'] = pd.to_datetime(df_filtered_local['Data']).dt.to_period('M').astype(str)
 
-        resumo = df_filtered_local.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
-        # garantir colunas Entrada/Gasto existam
-        if 'Entrada' not in resumo.columns:
-            resumo['Entrada'] = 0.0
-        if 'Gasto' not in resumo.columns:
-            resumo['Gasto'] = 0.0
-        resumo['Saldo'] = resumo['Entrada'] - resumo['Gasto']
+            resumo = df_filtered_local.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().unstack(fill_value=0)
+            # garantir colunas Entrada/Gasto existam
+            if 'Entrada' not in resumo.columns:
+                resumo['Entrada'] = 0.0
+            if 'Gasto' not in resumo.columns:
+                resumo['Gasto'] = 0.0
+            resumo['Saldo'] = resumo['Entrada'] - resumo['Gasto']
 
-        st.subheader("📊 Resumo Mensal")
-        st.dataframe(resumo)
+            st.subheader("📊 Resumo Mensal")
+            st.dataframe(resumo)
 
-        # carregar metas atuais (após possível edição)
-        goals = load_goals()
-        profile_goals = goals.get(profile, {})
-        meta_gasto_val = profile_goals.get('meta_gasto', None)
-        meta_sobra_percent_val = profile_goals.get('meta_sobra_percent', None)
+            # carregar metas atuais (após possível edição)
+            goals = load_goals()
+            profile_goals = goals.get(profile, {})
+            meta_gasto_val = profile_goals.get('meta_gasto', None)
+            meta_sobra_percent_val = profile_goals.get('meta_sobra_percent', None)
 
-        # mostrar metas atuais
-        with st.expander("Metas atuais"):
-            st.write(f"Meta de Gastos mensal: R$ {meta_gasto_val if meta_gasto_val not in (None, pd.NA) else 'Não definida'}")
-            st.write(f"Meta de sobra: {meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else 'Não definida'} % da entrada")
+            # mostrar metas atuais
+            with st.expander("Metas atuais"):
+                st.write(f"Meta de Gastos mensal: R$ {meta_gasto_val if meta_gasto_val not in (None, pd.NA) else 'Não definida'}")
+                st.write(f"Meta de sobra: {meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else 'Não definida'} % da entrada")
 
-        # gráficos de comparação com metas
-        plot_spending_vs_goal(resumo, meta_gasto_val if meta_gasto_val not in (None, pd.NA) else None, profile)
-        plot_sobra_vs_goal(resumo, meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else None, profile)
+            # gráficos de comparação com metas
+            plot_spending_vs_goal(resumo, meta_gasto_val if meta_gasto_val not in (None, pd.NA) else None, profile)
+            plot_sobra_vs_goal(resumo, meta_sobra_percent_val if meta_sobra_percent_val not in (None, pd.NA) else None, profile)
 
     # --- Aba de Perfis ---
     def manage_profiles_tab():
