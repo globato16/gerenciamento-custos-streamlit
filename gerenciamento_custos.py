@@ -421,19 +421,6 @@ else:
             column_config=column_config
         )
 
-
-    # --- Resumo Financeiro ---
-    if not df_filtered.empty:
-        entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
-        gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
-        saldo_total = entrada_total - gasto_total
-
-        st.markdown("---")
-        st.subheader("Resumo Financeiro")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
-        col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
-        col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
         if not edited_df.equals(display_df):
             # salvar de volta por perfil (atenção para não sobrescrever linhas fora do filtro)
             for profile in profiles:
@@ -450,6 +437,19 @@ else:
 
         # --- Gráficos depois ---
         st.markdown("---")
+
+    # --- Resumo Financeiro ---
+    if not df_filtered.empty:
+        entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
+        gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
+        saldo_total = entrada_total - gasto_total
+
+        st.markdown("---")
+        st.subheader("Resumo Financeiro")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
+        col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
+        col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
         st.subheader("📈 Gráfico de Tendência")
         plot_trend_chart(df_filtered)
 
@@ -567,6 +567,19 @@ else:
 
         # --- Gráficos depois ---
         st.markdown("---")
+
+    # --- Resumo Financeiro ---
+    if not df_filtered.empty:
+        entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
+        gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
+        saldo_total = entrada_total - gasto_total
+
+        st.markdown("---")
+        st.subheader("Resumo Financeiro")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
+        col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
+        col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
         st.subheader("📈 Tendência de Gastos e Entradas")
         plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
 
