@@ -543,7 +543,7 @@ else:
         # --- Tabela primeiro ---
         st.subheader("🧾 Tabela de Transações")
 
-        cols_to_show = [c for c in df_profile.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
+        cols_to_show = [c for c in df_filtered.columns if c in ['Data', 'Tipo', 'Categoria', 'Descrição', 'Valor', 'PagoComCartao', 'Cartao', 'NumParcelas', 'ParcelaAtual', 'TotalCompra', 'Grupo']]
         column_config = {
             "Data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
             "Tipo": st.column_config.SelectboxColumn("Tipo", options=['Entrada', 'Gasto']),
@@ -553,14 +553,14 @@ else:
             "Grupo": st.column_config.TextColumn("Grupo", disabled=True),
         }
         edited_df = st.data_editor(
-            df_profile[cols_to_show],
+            df_filtered[cols_to_show],
             key=f"data_editor_{profile}",
             use_container_width=True,
             num_rows="dynamic",
             column_config=column_config
         )
 
-        if not edited_df.equals(df_profile[cols_to_show]):
+        if not edited_df.equals(df_filtered[cols_to_show]):
             save_data(edited_df, profile)
             st.success("Transações atualizadas com sucesso!")
             st.rerun()
