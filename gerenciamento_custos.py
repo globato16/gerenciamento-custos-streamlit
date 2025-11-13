@@ -339,8 +339,8 @@ if not st.session_state['logged_in']:
             else:
                 st.error("Usuário ou senha incorretos.")
 else:
-    # --- Funções de Gráficos ---
-    def plot_trend_chart(df, title="Tendência de Gastos e Entradas"):
+    # --- Funções de Gráficos (aceitam key para evitar DuplicateElementId) ---
+    def plot_trend_chart(df, title="Tendência de Gastos e Entradas", key=None):
         if df.empty:
             st.info("Sem dados para exibir o gráfico de tendência.")
             return
@@ -349,18 +349,18 @@ else:
         grouped = df_local.groupby(['Ano-Mês', 'Tipo'])['Valor'].sum().reset_index()
         fig = px.line(grouped, x='Ano-Mês', y='Valor', color='Tipo', markers=True, title=title)
         fig.update_layout(xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
-    def plot_category_chart(df, title="Distribuição por Categoria"):
+    def plot_category_chart(df, title="Distribuição por Categoria", key=None):
         if df.empty:
             st.info("Sem dados para exibir a distribuição de categorias.")
             return
         grouped = df.groupby('Categoria')['Valor'].sum().reset_index().sort_values('Valor', ascending=False)
         fig = px.bar(grouped, x='Categoria', y='Valor', text_auto=True, title=title)
         fig.update_layout(xaxis_title="", yaxis_title="Valor (R$)", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
-    def plot_profile_comparison(df_all):
+    def plot_profile_comparison(df_all, key=None):
         if df_all.empty:
             st.info("Sem dados para comparação de perfis.")
             return
@@ -370,9 +370,9 @@ else:
         grouped = df_all.groupby(['Pessoa', 'Tipo'])['Valor'].sum().reset_index()
         fig = px.bar(grouped, x='Pessoa', y='Valor', color='Tipo', barmode='group', title="Comparativo de Entradas e Gastos por Perfil")
         fig.update_layout(template="plotly_white", yaxis_title="Valor (R$)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
-    def plot_spending_vs_goal(resumo_df, meta_gasto, profile):
+    def plot_spending_vs_goal(resumo_df, meta_gasto, profile, key=None):
         if resumo_df.empty:
             st.info("Sem dados para exibir comparação com meta.")
             return
@@ -383,14 +383,14 @@ else:
         if meta_gasto is not None:
             fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=[meta_gasto]*len(dfp), mode='lines', name='Meta Gasto', line=dict(color='black', dash='dash')))
         fig.update_layout(title=f"Gastos x Meta - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
         if meta_gasto is not None:
             dfp['Excedeu'] = dfp['Gasto'] > meta_gasto
             excedeu_count = dfp['Excedeu'].sum()
             st.write(f"{excedeu_count} mês(es) superaram a meta de gasto.")
 
-    def plot_sobra_vs_goal(resumo_df, meta_sobra_percent, profile):
+    def plot_sobra_vs_goal(resumo_df, meta_sobra_percent, profile, key=None):
         if resumo_df.empty:
             st.info("Sem dados para exibir comparação de sobra com meta.")
             return
@@ -403,7 +403,7 @@ else:
             dfp['MetaSobra'] = dfp.get('Entrada', 0) * (meta_sobra_percent / 100.0)
             fig.add_trace(go.Scatter(x=dfp['Ano-Mês'], y=dfp['MetaSobra'], mode='lines', name=f'Meta Sobra ({meta_sobra_percent}%)', line=dict(color='black', dash='dash')))
         fig.update_layout(title=f"Sobra x Meta de Sobra - {profile}", xaxis_title="Mês", yaxis_title="Valor (R$)", template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=key)
 
         if meta_sobra_percent is not None:
             dfp['AtingiuSobra'] = dfp['Sobra'] >= dfp['MetaSobra']
@@ -612,10 +612,10 @@ else:
         # --- Gráficos e Resumo (usando df_filtered) ---
         st.markdown("---")
         st.subheader("📈 Tendência de Gastos e Entradas")
-        plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
+        plot_trend_chart(df_filtered, title=f"Tendência - {profile}", key=f"trend_{profile}")
 
         st.subheader("🍕 Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], title=f"Distribuição de Gastos - {profile}", key=f"cat_{profile}")
 
         st.subheader("📊 Resumo Mensal")
         df_filtered_local = df_filtered.copy()
@@ -704,6 +704,7 @@ else:
 
         edited_df = st.data_editor(
             display_df,
+            key="data_editor_general",
             use_container_width=True,
             num_rows="dynamic",
             column_config=column_config
@@ -758,13 +759,13 @@ else:
         # --- Gráficos depois ---
         st.markdown("---")
         st.subheader("📈 Gráfico de Tendência")
-        plot_trend_chart(df_filtered)
+        plot_trend_chart(df_filtered, key="trend_general")
 
         st.subheader("🍕 Distribuição de Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
+        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'], key="cat_general")
 
         st.subheader("👥 Comparativo entre Perfis")
-        plot_profile_comparison(df_filtered)
+        plot_profile_comparison(df_filtered, key="profilecomp_general")
 
     # --- Aba de Perfis ---
     def manage_profiles_tab():
