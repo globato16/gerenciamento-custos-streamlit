@@ -437,27 +437,27 @@ else:
 
         # --- Gráficos depois ---
 
-    # --- Resumo Financeiro ---
-    if not df_filtered.empty:
-        entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
-        gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
-        saldo_total = entrada_total - gasto_total
+        # --- Resumo Financeiro ---
+        if not df_filtered.empty:
+            entrada_total = df_filtered[df_filtered['Tipo'] == 'Entrada']['Valor'].sum()
+            gasto_total = df_filtered[df_filtered['Tipo'] == 'Gasto']['Valor'].sum()
+            saldo_total = entrada_total - gasto_total
 
-        st.markdown("---")
-        st.subheader("Resumo Financeiro")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
-        col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
-        col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
-        st.markdown("---")
-        st.subheader("📈 Gráfico de Tendência")
-        plot_trend_chart(df_filtered)
+            st.markdown("---")
+            st.subheader("Resumo Financeiro")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
+            col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
+            col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+            st.markdown("---")
+            st.subheader("📈 Gráfico de Tendência")
+            plot_trend_chart(df_filtered)
 
-        st.subheader("🍕 Distribuição de Gastos por Categoria")
-        plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
+            st.subheader("🍕 Distribuição de Gastos por Categoria")
+            plot_category_chart(df_filtered[df_filtered['Tipo'] == 'Gasto'])
 
-        st.subheader("👥 Comparativo entre Perfis")
-        plot_profile_comparison(df_filtered)
+            st.subheader("👥 Comparativo entre Perfis")
+            plot_profile_comparison(df_filtered)
 
     # --- Aba de Perfil ---
     def profile_tab(profile):
