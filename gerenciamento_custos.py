@@ -449,6 +449,11 @@ else:
         col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
         col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
         col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+
+        # Gráfico de pizza Entradas vs Gastos
+        fig_pizza = px.pie(names=['Entradas', 'Gastos'], values=[entrada_total, gasto_total], title='Proporção Entradas vs Gastos')
+        fig_pizza.update_traces(textinfo='label+percent', pull=[0.05, 0])
+        st.plotly_chart(fig_pizza, use_container_width=True)
         st.markdown("---")
         st.subheader("📈 Gráfico de Tendência")
         plot_trend_chart(df_filtered)
@@ -579,6 +584,11 @@ else:
         col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
         col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
         col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+
+        # Gráfico de pizza Entradas vs Gastos
+        fig_pizza = px.pie(names=['Entradas', 'Gastos'], values=[entrada_total, gasto_total], title='Proporção Entradas vs Gastos')
+        fig_pizza.update_traces(textinfo='label+percent', pull=[0.05, 0])
+        st.plotly_chart(fig_pizza, use_container_width=True)
         st.markdown("---")
         st.subheader("📈 Tendência de Gastos e Entradas")
         plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
