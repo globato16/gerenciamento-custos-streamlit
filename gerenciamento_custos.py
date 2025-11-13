@@ -436,7 +436,6 @@ else:
             st.rerun()
 
         # --- Gráficos depois ---
-        st.markdown("---")
 
     # --- Resumo Financeiro ---
     if not df_filtered.empty:
@@ -450,6 +449,7 @@ else:
         col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
         col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
         col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+        st.markdown("---")
         st.subheader("📈 Gráfico de Tendência")
         plot_trend_chart(df_filtered)
 
@@ -566,7 +566,6 @@ else:
             st.rerun()
 
         # --- Gráficos depois ---
-        st.markdown("---")
 
     # --- Resumo Financeiro ---
     if not df_filtered.empty:
@@ -580,6 +579,7 @@ else:
         col1.metric("Total de Entradas", f"R$ {entrada_total:,.2f}")
         col2.metric("Total de Gastos", f"R$ {gasto_total:,.2f}")
         col3.metric("Saldo", f"R$ {saldo_total:,.2f}")
+        st.markdown("---")
         st.subheader("📈 Tendência de Gastos e Entradas")
         plot_trend_chart(df_filtered, title=f"Tendência - {profile}")
 
